@@ -34,9 +34,10 @@ type ArgumentList struct {
 	QueryMonitoringResponseTimeThreshold int    `default:"1" help:"Threshold in milliseconds for query response time. If response time for the individual query exceeds this threshold, the individual query is reported in metrics"`
 	QueryMonitoringCountThreshold        int    `default:"20" help:"The number of records for each query performance metrics"`
 	IsRds                                bool   `default:"false" help:"If true, the integration will support on AWS RDS. This will enable RDS-specific metrics and configurations."`
-	CollectConnectionTiming              bool   `default:"false" help:"If true, measures DNS lookup, TCP connect, and total authenticated-connect time each collection cycle and reports them in PostgresqlConnectionSample."`
+	CollectConnectionTiming              bool   `default:"false" help:"If true, measures DNS lookup and TCP connect time via the connection's DialFunc and reports them in PostgresqlConnectionSample. No extra round-trip is issued; timing is captured on the first query of each cycle."`
 	EnableAvailabilityCheck              bool   `default:"false" help:"If true, runs an explicit canary query each cycle to verify the server can process queries, reported in PostgresqlConnectionSample."`
 	AvailabilityCheckQuery               string `default:"SELECT 1" help:"SQL query used for the explicit availability check. Defaults to 'SELECT 1'."`
+	AvailabilityCheckTimeoutMs           int    `default:"10000" help:"Timeout in milliseconds for the explicit availability check query. Defaults to 10000ms. Set below the collection interval to ensure a timed-out check does not block the next cycle."`
 	CollectQueryTelemetry                bool   `default:"false" help:"If true, emits a PostgresqlQueryTelemetrySample event for every internal monitoring query with duration, error status, and error classification."`
 }
 

@@ -762,9 +762,8 @@ func TestPublishConnectionSample_Success_WithTiming(t *testing.T) {
 
 	conn, _ := connection.CreateMockSQL(t)
 	conn.Timing = &connection.ConnectionTiming{
-		DNSLookupMs:    5.0,
-		TCPConnectMs:   10.0,
-		TotalConnectMs: 30.0,
+		DNSLookupMs:  5.0,
+		TCPConnectMs: 10.0,
 	}
 
 	publishConnectionSample(instance, conn, nil)
@@ -774,8 +773,8 @@ func TestPublishConnectionSample_Success_WithTiming(t *testing.T) {
 	assert.Equal(t, float64(1), metrics["db.available"])
 	assert.Equal(t, 5.0, metrics["db.connection.dnsLookupMs"])
 	assert.Equal(t, 10.0, metrics["db.connection.tcpConnectMs"])
-	assert.Equal(t, 30.0, metrics["db.connection.totalConnectMs"])
-	assert.Equal(t, 15.0, metrics["db.connection.tlsAndAuthMs"]) // 30 - 5 - 10
+	assert.NotContains(t, metrics, "db.connection.totalConnectMs")
+	assert.NotContains(t, metrics, "db.connection.tlsAndAuthMs")
 }
 
 func TestPublishConnectionSample_ConnectionError(t *testing.T) {

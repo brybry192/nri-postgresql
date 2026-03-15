@@ -10,22 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConnectionTiming_TLSAndAuthMs_Normal(t *testing.T) {
-	ct := &ConnectionTiming{DNSLookupMs: 10, TCPConnectMs: 20, TotalConnectMs: 50}
-	assert.InDelta(t, 20.0, ct.TLSAndAuthMs(), 0.001)
-}
-
-func TestConnectionTiming_TLSAndAuthMs_ClampedToZero(t *testing.T) {
-	// DNS + TCP > Total: must not return a negative value.
-	ct := &ConnectionTiming{DNSLookupMs: 40, TCPConnectMs: 30, TotalConnectMs: 50}
-	assert.Equal(t, 0.0, ct.TLSAndAuthMs())
-}
-
-func TestConnectionTiming_TLSAndAuthMs_AllZero(t *testing.T) {
-	ct := &ConnectionTiming{}
-	assert.Equal(t, 0.0, ct.TLSAndAuthMs())
-}
-
 func TestMsec(t *testing.T) {
 	assert.Equal(t, 1000.0, msec(time.Second))
 	assert.Equal(t, 500.0, msec(500*time.Millisecond))

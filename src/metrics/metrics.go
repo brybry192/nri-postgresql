@@ -1,11 +1,13 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"reflect"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/newrelic/infra-integrations-sdk/v3/data/attribute"
@@ -24,9 +26,10 @@ const (
 
 // ObservabilityConfig holds the optional APM-style observability settings passed to PopulateMetrics.
 type ObservabilityConfig struct {
-	EnableAvailabilityCheck bool
-	AvailabilityCheckQuery  string
-	CollectQueryTelemetry   bool
+	EnableAvailabilityCheck    bool
+	AvailabilityCheckQuery     string
+	AvailabilityCheckTimeoutMs int
+	CollectQueryTelemetry      bool
 }
 
 // PopulateMetrics collects metrics for each type
@@ -52,12 +55,20 @@ func PopulateMetrics(
 	defer con.Close()
 
 	// Explicit availability check — runs a canary query to verify query execution works.
+	// A deadline context ensures the check cannot block past the configured timeout,
+	// preventing a slow/hung server from delaying the rest of the collection cycle.
 	if obs.EnableAvailabilityCheck {
 		q := obs.AvailabilityCheckQuery
 		if q == "" {
 			q = availability.DefaultQuery
 		}
-		result := availability.ExplicitCheck(con, q)
+		timeoutMs := obs.AvailabilityCheckTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = 10000
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+		defer cancel()
+		result := availability.ExplicitCheck(ctx, con, q)
 		publishAvailabilityCheckSample(instance, result)
 	}
 
@@ -127,8 +138,6 @@ func publishConnectionSample(instance *integration.Entity, con *connection.PGSQL
 		t := con.Timing
 		setGauge(ms, "db.connection.dnsLookupMs", t.DNSLookupMs)
 		setGauge(ms, "db.connection.tcpConnectMs", t.TCPConnectMs)
-		setGauge(ms, "db.connection.tlsAndAuthMs", t.TLSAndAuthMs())
-		setGauge(ms, "db.connection.totalConnectMs", t.TotalConnectMs)
 	}
 }
 

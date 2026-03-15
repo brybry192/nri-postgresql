@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"errors"
 	"net"
 	"regexp"
@@ -51,6 +52,11 @@ func ClassifyError(err error) (code, message string) {
 	}
 
 	message = err.Error()
+
+	// Context deadline exceeded or cancellation — e.g. availability check timeout.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "timeout", message
+	}
 
 	// PostgreSQL server error — structured SQLSTATE code
 	var pgErr *pgconn.PgError

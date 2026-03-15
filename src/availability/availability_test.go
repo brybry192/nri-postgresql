@@ -1,6 +1,7 @@
 package availability
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestExplicitCheck_Available(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"?column?"}).AddRow(1)
 	mock.ExpectQuery("SELECT 1").WillReturnRows(rows)
 
-	result := ExplicitCheck(conn, "SELECT 1")
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
 
 	assert.True(t, result.Available)
 	assert.Equal(t, "SELECT 1", result.Query)
@@ -35,7 +36,7 @@ func TestExplicitCheck_EmptyResultSet(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"?column?"}) // no rows added
 	mock.ExpectQuery("SELECT 1").WillReturnRows(rows)
 
-	result := ExplicitCheck(conn, "SELECT 1")
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
 
 	assert.False(t, result.Available)
 	assert.Empty(t, result.ErrorCode)
@@ -48,7 +49,7 @@ func TestExplicitCheck_QueryError(t *testing.T) {
 	conn, mock := connection.CreateMockSQL(t)
 	mock.ExpectQuery("SELECT 1").WillReturnError(errors.New("connection refused"))
 
-	result := ExplicitCheck(conn, "SELECT 1")
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
 
 	assert.False(t, result.Available)
 	assert.Equal(t, "connection_refused", result.ErrorCode)
@@ -61,10 +62,23 @@ func TestExplicitCheck_QueryErrorEOF(t *testing.T) {
 	conn, mock := connection.CreateMockSQL(t)
 	mock.ExpectQuery(".*").WillReturnError(errors.New("read tcp: EOF"))
 
-	result := ExplicitCheck(conn, "SELECT 1")
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
 
 	assert.False(t, result.Available)
 	assert.Equal(t, "server_closed_connection", result.ErrorCode)
+}
+
+// TestExplicitCheck_Timeout verifies that a context deadline exceeded error is
+// classified as "timeout", not "unknown_error".
+func TestExplicitCheck_Timeout(t *testing.T) {
+	conn, mock := connection.CreateMockSQL(t)
+	mock.ExpectQuery(".*").WillReturnError(context.DeadlineExceeded)
+
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
+
+	assert.False(t, result.Available)
+	assert.Equal(t, "timeout", result.ErrorCode)
+	assert.NotEmpty(t, result.ErrorMessage)
 }
 
 // TestExplicitCheck_CustomQuery verifies that a non-default canary query is passed through
@@ -74,20 +88,19 @@ func TestExplicitCheck_CustomQuery(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"health"}).AddRow("ok")
 	mock.ExpectQuery("SELECT health FROM monitoring.status").WillReturnRows(rows)
 
-	result := ExplicitCheck(conn, "SELECT health FROM monitoring.status")
+	result := ExplicitCheck(context.Background(), conn, "SELECT health FROM monitoring.status")
 
 	assert.True(t, result.Available)
 	assert.Equal(t, "SELECT health FROM monitoring.status", result.Query)
 }
 
-// TestExplicitCheck_DurationMeasured verifies that DurationMs is populated even on error.
+// TestExplicitCheck_DurationMeasuredOnError verifies that DurationMs is populated even on error.
 func TestExplicitCheck_DurationMeasuredOnError(t *testing.T) {
 	conn, mock := connection.CreateMockSQL(t)
 	mock.ExpectQuery(".*").WillReturnError(errors.New("connection refused"))
 
-	result := ExplicitCheck(conn, "SELECT 1")
+	result := ExplicitCheck(context.Background(), conn, "SELECT 1")
 
 	assert.False(t, result.Available)
-	// DurationMs must be non-negative; the mock returns immediately so it may be very small.
 	assert.GreaterOrEqual(t, result.DurationMs, 0.0)
 }

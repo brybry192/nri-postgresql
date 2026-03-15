@@ -5,6 +5,7 @@
 package availability
 
 import (
+	"context"
 	"time"
 
 	"github.com/newrelic/nri-postgresql/src/connection"
@@ -22,13 +23,15 @@ type CheckResult struct {
 }
 
 // ExplicitCheck runs the given query against conn and returns a CheckResult.
+// The context should carry a deadline so the check is bounded and cannot block
+// past the next collection cycle. Use context.Background() only in tests.
 // The query should be lightweight — the default is "SELECT 1".
 // A non-error result with at least one row is considered available.
-func ExplicitCheck(conn *connection.PGSQLConnection, query string) *CheckResult {
+func ExplicitCheck(ctx context.Context, conn *connection.PGSQLConnection, query string) *CheckResult {
 	result := &CheckResult{Query: query}
 
 	start := time.Now()
-	rows, err := conn.Queryx(query)
+	rows, err := conn.QueryxContext(ctx, query)
 	result.DurationMs = float64(time.Since(start)) / float64(time.Millisecond)
 
 	if err != nil {

@@ -72,9 +72,10 @@ func main() {
 	}
 	if args.HasMetrics() {
 		obs := metrics.ObservabilityConfig{
-			EnableAvailabilityCheck: args.EnableAvailabilityCheck,
-			AvailabilityCheckQuery:  args.AvailabilityCheckQuery,
-			CollectQueryTelemetry:   args.CollectQueryTelemetry,
+			EnableAvailabilityCheck:    args.EnableAvailabilityCheck,
+			AvailabilityCheckQuery:     args.AvailabilityCheckQuery,
+			AvailabilityCheckTimeoutMs: args.AvailabilityCheckTimeoutMs,
+			CollectQueryTelemetry:      args.CollectQueryTelemetry,
 		}
 		metrics.PopulateMetrics(connectionInfo, collectionList, instance, pgIntegration, args.Pgbouncer, args.CollectDbLockMetrics, args.CollectBloatMetrics, args.CustomMetricsQuery, obs)
 		if args.CustomMetricsConfig != "" {

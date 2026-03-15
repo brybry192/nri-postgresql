@@ -2,6 +2,7 @@
 package connection
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"time"
@@ -77,8 +78,9 @@ func DefaultConnectionInfo(al *args.ArgumentList) Info {
 
 // NewConnection creates a new PGSQLConnection.
 // Uses pgx/v5/stdlib as the driver (replaces lib/pq).
-// When CollectConnectionTiming is enabled the connection is forced open immediately via Ping
-// so that the DialFunc-based DNS/TCP timing is captured synchronously.
+// When CollectConnectionTiming is enabled, a DialFunc is attached that measures
+// DNS and TCP time on the first query's connection establishment — no extra Ping
+// is issued, so there is no additional round-trip to the server.
 func (ci *connectionInfo) NewConnection(database string) (*PGSQLConnection, error) {
 	urlStr := createConnectionURL(ci, database)
 
@@ -108,16 +110,6 @@ func (ci *connectionInfo) NewConnection(database string) (*PGSQLConnection, erro
 		return nil, err
 	}
 	pgConn.connection = db
-
-	if ci.CollectConnectionTiming {
-		// Force eager connect so DialFunc fires now and total time is captured.
-		connectStart := time.Now()
-		if err := db.Ping(); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		pgConn.Timing.TotalConnectMs = msec(time.Since(connectStart))
-	}
 
 	return pgConn, nil
 }
@@ -164,6 +156,19 @@ func (p PGSQLConnection) Queryx(query string) (*sqlx.Rows, error) {
 		return rows, err
 	}
 	return p.connection.Queryx(query)
+}
+
+// QueryxContext runs a query with the provided context and returns a set of rows.
+// The context deadline is honoured by the driver, allowing callers to bound
+// query execution time (e.g. the availability check timeout).
+func (p PGSQLConnection) QueryxContext(ctx context.Context, query string) (*sqlx.Rows, error) {
+	if p.telemetry.enabled {
+		start := time.Now()
+		rows, err := p.connection.QueryxContext(ctx, query)
+		p.telemetry.record(extractQueryName(query), p.database, time.Since(start), err)
+		return rows, err
+	}
+	return p.connection.QueryxContext(ctx, query)
 }
 
 type extensions map[string]map[string]bool

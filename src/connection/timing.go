@@ -9,25 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ConnectionTiming holds measured timing for each phase of a new database connection.
-// DNS and TCP times are captured inside the pgx DialFunc (the actual connection, not a probe).
-// TotalConnectMs covers the full authenticated session: DNS + TCP + TLS + auth.
-// TLSAndAuthMs is derived: TotalConnectMs - DNSLookupMs - TCPConnectMs.
+// ConnectionTiming holds DNS and TCP timing for a new database connection.
+// Both values are captured inside the pgx DialFunc, which fires on the first real
+// query issued against the connection — no extra Ping is used. When
+// ENABLE_AVAILABILITY_CHECK is true the DialFunc fires during that query, giving
+// the timing breakdown for the same connection that the availability check validates.
 type ConnectionTiming struct {
-	DNSLookupMs    float64
-	TCPConnectMs   float64
-	TotalConnectMs float64
-}
-
-// TLSAndAuthMs returns the portion of connect time spent in TLS handshake and authentication.
-// This is a derived value because pgx handles TLS internally after the TCP conn is returned
-// from DialFunc — the two phases cannot be measured separately without wrapping net.Conn.
-func (ct *ConnectionTiming) TLSAndAuthMs() float64 {
-	v := ct.TotalConnectMs - ct.DNSLookupMs - ct.TCPConnectMs
-	if v < 0 {
-		return 0
-	}
-	return v
+	DNSLookupMs  float64
+	TCPConnectMs float64
 }
 
 // timingDialFunc returns a pgx DialFunc that measures DNS resolution and TCP connection time,

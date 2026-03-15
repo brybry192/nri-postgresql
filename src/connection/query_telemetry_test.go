@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -24,6 +25,17 @@ func (e *mockNetError) Temporary() bool { return false }
 // ---------------------------------------------------------------------------
 // ClassifyError
 // ---------------------------------------------------------------------------
+
+func TestClassifyError_ContextDeadlineExceeded(t *testing.T) {
+	code, msg := ClassifyError(context.DeadlineExceeded)
+	assert.Equal(t, "timeout", code)
+	assert.Contains(t, msg, "deadline exceeded")
+}
+
+func TestClassifyError_ContextCanceled(t *testing.T) {
+	code, _ := ClassifyError(context.Canceled)
+	assert.Equal(t, "timeout", code)
+}
 
 func TestClassifyError_Nil(t *testing.T) {
 	code, msg := ClassifyError(nil)

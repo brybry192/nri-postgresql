@@ -66,9 +66,10 @@
             SSL_KEY_LOCATION: /etc/newrelic-infra/postgresql.key
             TIMEOUT: 10
 
-            # Measure DNS lookup, TCP connect, TLS+auth, and total connect time on each collection
-            # cycle. Results are emitted as db.connection.* gauges in PostgresqlConnectionSample.
-            # Defaults to false. When enabled, forces an eager connection on startup to capture timing.
+            # Measure DNS lookup and TCP connect time on each collection cycle, reported as
+            # db.connection.dnsLookupMs and db.connection.tcpConnectMs in PostgresqlConnectionSample.
+            # Timing is captured via the connection's DialFunc on the first query of each cycle —
+            # no extra round-trip to the server is issued. Defaults to false.
             # COLLECT_CONNECTION_TIMING: false
 
             # Run an explicit canary query each cycle to verify the server can execute queries,
@@ -76,13 +77,19 @@
             # in PostgresqlConnectionSample with checkType=explicit. Defaults to false.
             # ENABLE_AVAILABILITY_CHECK: false
 
-            # SQL query used for the explicit availability check. Defaults to 'SELECT 1'.
-            # Override with a lightweight application-specific query if desired.
+            # SQL query used for the explicit availability check. Should be lightweight.
+            # Defaults to 'SELECT 1'. Override with an application-specific health query if desired.
             # AVAILABILITY_CHECK_QUERY: "SELECT 1"
+
+            # Timeout in milliseconds for the explicit availability check query.
+            # Must be less than the collection interval to prevent a hung check from blocking
+            # the next cycle. Defaults to 10000ms (10 seconds).
+            # AVAILABILITY_CHECK_TIMEOUT_MS: 10000
 
             # Emit one PostgresqlQueryTelemetrySample event per internal monitoring query per run,
             # containing the query name, duration, error status, and structured error code.
             # Useful for diagnosing which monitoring query is slow or failing. Defaults to false.
+            # Note: increases New Relic event ingest volume proportional to schema size.
             # COLLECT_QUERY_TELEMETRY: false
 
             CUSTOM_METRICS_QUERY: >-
