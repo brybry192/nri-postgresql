@@ -73,6 +73,25 @@ integrations:
     # SSL_ROOT_CERT_LOCATION: /etc/newrelic-infra/root_cert.crt
     TIMEOUT: "10"
 
+    # Measure DNS lookup, TCP connect, TLS+auth, and total connect time on each collection
+    # cycle. Results are emitted as db.connection.* gauges in PostgresqlConnectionSample.
+    # Defaults to false. When enabled, forces an eager connection on startup to capture timing.
+    # COLLECT_CONNECTION_TIMING: "false"
+
+    # Run an explicit canary query each cycle to verify the server can execute queries,
+    # not just accept connections. Results are emitted as db.availabilityCheck.* fields
+    # in PostgresqlConnectionSample with checkType=explicit. Defaults to false.
+    # ENABLE_AVAILABILITY_CHECK: "false"
+
+    # SQL query used for the explicit availability check. Defaults to 'SELECT 1'.
+    # Override with a lightweight application-specific query if desired.
+    # AVAILABILITY_CHECK_QUERY: "SELECT 1"
+
+    # Emit one PostgresqlQueryTelemetrySample event per internal monitoring query per run,
+    # containing the query name, duration, error status, and structured error code.
+    # Useful for diagnosing which monitoring query is slow or failing. Defaults to false.
+    # COLLECT_QUERY_TELEMETRY: "false"
+
     # A SQL query to collect custom metrics. Must have the columns metric_name, metric_type, and metric_value. Additional columns are added as attributes
     # CUSTOM_METRICS_QUERY: >-
     #   select

@@ -9,6 +9,13 @@ Unreleased section should follow [Release Toolkit](https://github.com/newrelic/r
 
 ## Unreleased
 
+### 🚀 Enhancements
+- Migrated database driver from `github.com/lib/pq` (maintenance mode) to `github.com/jackc/pgx/v5`, unlocking connection lifecycle hooks required for the observability features below
+- Added `COLLECT_CONNECTION_TIMING` flag: measures DNS lookup, TCP connect, and total authenticated-connect time each collection cycle, reported as `db.connection.*` gauges in `PostgresqlConnectionSample`
+- Added `ENABLE_AVAILABILITY_CHECK` and `AVAILABILITY_CHECK_QUERY` flags: runs a configurable canary query each cycle to verify the server can process queries (not just accept connections), reported as `db.availabilityCheck.*` in `PostgresqlConnectionSample` with `checkType=explicit`
+- Added `COLLECT_QUERY_TELEMETRY` flag: emits one `PostgresqlQueryTelemetrySample` event per internal monitoring query per run, with duration, error status, and structured error classification
+- All new flags default to `false` — no change in behavior unless explicitly enabled
+
 ## v2.25.0 - 2026-02-18
 
 ### 🛡️ Security notices
