@@ -1,15 +1,18 @@
 package metrics
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/blang/semver/v4"
 	"github.com/newrelic/infra-integrations-sdk/v3/integration"
+	"github.com/newrelic/nri-postgresql/src/availability"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	tmock "github.com/stretchr/testify/mock"
 	"gopkg.in/DATA-DOG/go-sqlmock.v1"
 )
@@ -730,6 +733,226 @@ func TestPopulateMetrics(t *testing.T) {
 	instance, _ := testIntegration.Entity("testInstance", "instance")
 
 	PopulateMetrics(ci, dbList, instance, testIntegration, true, true, true, "", ObservabilityConfig{})
+}
+
+// ---------------------------------------------------------------------------
+// publishConnectionSample
+// ---------------------------------------------------------------------------
+
+func TestPublishConnectionSample_Success_NoTiming(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	conn, _ := connection.CreateMockSQL(t)
+	// conn.Timing is nil by default — timing metrics should be absent.
+
+	publishConnectionSample(instance, conn, nil)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, float64(1), metrics["db.available"])
+	assert.Equal(t, "PostgresqlConnectionSample", metrics["event_type"])
+	assert.NotContains(t, metrics, "db.connection.dnsLookupMs")
+	assert.NotContains(t, metrics, "db.connection.errorCode")
+}
+
+func TestPublishConnectionSample_Success_WithTiming(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	conn, _ := connection.CreateMockSQL(t)
+	conn.Timing = &connection.ConnectionTiming{
+		DNSLookupMs:    5.0,
+		TCPConnectMs:   10.0,
+		TotalConnectMs: 30.0,
+	}
+
+	publishConnectionSample(instance, conn, nil)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, float64(1), metrics["db.available"])
+	assert.Equal(t, 5.0, metrics["db.connection.dnsLookupMs"])
+	assert.Equal(t, 10.0, metrics["db.connection.tcpConnectMs"])
+	assert.Equal(t, 30.0, metrics["db.connection.totalConnectMs"])
+	assert.Equal(t, 15.0, metrics["db.connection.tlsAndAuthMs"]) // 30 - 5 - 10
+}
+
+func TestPublishConnectionSample_ConnectionError(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	// con is nil when NewConnection fails — mirrors production behaviour.
+	publishConnectionSample(instance, nil, errors.New("connection refused"))
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, float64(0), metrics["db.available"])
+	assert.Equal(t, "connection_refused", metrics["db.connection.errorCode"])
+	assert.NotEmpty(t, metrics["db.connection.errorMessage"])
+	assert.NotContains(t, metrics, "db.connection.dnsLookupMs")
+}
+
+func TestPublishConnectionSample_ConnectionError_AlwaysEmitsSample(t *testing.T) {
+	// A sample must always be emitted even on total connection failure so that
+	// New Relic alert conditions on db.available can fire.
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	publishConnectionSample(instance, nil, errors.New("no such host: db.example.invalid"))
+
+	require.Len(t, instance.Metrics, 1)
+	assert.Equal(t, float64(0), instance.Metrics[0].Metrics["db.available"])
+	assert.Equal(t, "dns_resolution_failed", instance.Metrics[0].Metrics["db.connection.errorCode"])
+}
+
+// ---------------------------------------------------------------------------
+// publishAvailabilityCheckSample
+// ---------------------------------------------------------------------------
+
+func TestPublishAvailabilityCheckSample_Available(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	result := &availability.CheckResult{
+		Available:  true,
+		DurationMs: 2.5,
+		Query:      "SELECT 1",
+	}
+
+	publishAvailabilityCheckSample(instance, result)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, "PostgresqlConnectionSample", metrics["event_type"])
+	assert.Equal(t, "explicit", metrics["checkType"])
+	assert.Equal(t, float64(1), metrics["db.availabilityCheck.available"])
+	assert.Equal(t, 2.5, metrics["db.availabilityCheck.durationMs"])
+	assert.Equal(t, "SELECT 1", metrics["db.availabilityCheck.query"])
+	assert.NotContains(t, metrics, "db.availabilityCheck.errorCode")
+	assert.NotContains(t, metrics, "db.availabilityCheck.errorMessage")
+}
+
+func TestPublishAvailabilityCheckSample_Unavailable(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	result := &availability.CheckResult{
+		Available:    false,
+		DurationMs:   1.0,
+		Query:        "SELECT 1",
+		ErrorCode:    "connection_refused",
+		ErrorMessage: "dial tcp: connection refused",
+	}
+
+	publishAvailabilityCheckSample(instance, result)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, float64(0), metrics["db.availabilityCheck.available"])
+	assert.Equal(t, "connection_refused", metrics["db.availabilityCheck.errorCode"])
+	assert.Equal(t, "dial tcp: connection refused", metrics["db.availabilityCheck.errorMessage"])
+}
+
+func TestPublishAvailabilityCheckSample_CustomQuery(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	result := &availability.CheckResult{
+		Available: true,
+		Query:     "SELECT health FROM monitoring.status",
+	}
+
+	publishAvailabilityCheckSample(instance, result)
+
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, "SELECT health FROM monitoring.status", metrics["db.availabilityCheck.query"])
+}
+
+// ---------------------------------------------------------------------------
+// publishQueryTelemetrySamples
+// ---------------------------------------------------------------------------
+
+func TestPublishQueryTelemetrySamples_EmptySlice(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	publishQueryTelemetrySamples(instance, nil)
+
+	assert.Empty(t, instance.Metrics)
+}
+
+func TestPublishQueryTelemetrySamples_SuccessEntry(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	entries := []*connection.QueryTelemetry{
+		{QueryName: "BGWRITER_STATS", Database: "postgres", DurationMs: 12.5, HasError: false},
+	}
+
+	publishQueryTelemetrySamples(instance, entries)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, "PostgresqlQueryTelemetrySample", metrics["event_type"])
+	assert.Equal(t, 12.5, metrics["durationMs"])
+	assert.Equal(t, float64(0), metrics["hasError"])
+	assert.NotContains(t, metrics, "errorCode")
+	assert.NotContains(t, metrics, "errorMessage")
+}
+
+func TestPublishQueryTelemetrySamples_ErrorEntry(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	entries := []*connection.QueryTelemetry{
+		{
+			QueryName:    "FAIL_QUERY",
+			Database:     "mydb",
+			DurationMs:   3.0,
+			HasError:     true,
+			ErrorCode:    "connection_refused",
+			ErrorMessage: "dial tcp: connection refused",
+		},
+	}
+
+	publishQueryTelemetrySamples(instance, entries)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, float64(1), metrics["hasError"])
+	assert.Equal(t, "connection_refused", metrics["errorCode"])
+	assert.Equal(t, "dial tcp: connection refused", metrics["errorMessage"])
+}
+
+func TestPublishQueryTelemetrySamples_MultipleEntries_OneSampleEach(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	entries := []*connection.QueryTelemetry{
+		{QueryName: "Q1", Database: "db", DurationMs: 1.0},
+		{QueryName: "Q2", Database: "db", DurationMs: 2.0},
+		{QueryName: "Q3", Database: "db", DurationMs: 3.0},
+	}
+
+	publishQueryTelemetrySamples(instance, entries)
+
+	assert.Len(t, instance.Metrics, 3)
+}
+
+func TestPublishQueryTelemetrySamples_QueryNameAndDatabaseAsAttributes(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	entries := []*connection.QueryTelemetry{
+		{QueryName: "INDEX_STATS", Database: "appdb", DurationMs: 5.0},
+	}
+
+	publishQueryTelemetrySamples(instance, entries)
+
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, "INDEX_STATS", metrics["queryName"])
+	assert.Equal(t, "appdb", metrics["database"])
 }
 
 func TestPopulateCustomMetricsFromFile(t *testing.T) {
