@@ -71,7 +71,12 @@ func main() {
 		os.Exit(1)
 	}
 	if args.HasMetrics() {
-		metrics.PopulateMetrics(connectionInfo, collectionList, instance, pgIntegration, args.Pgbouncer, args.CollectDbLockMetrics, args.CollectBloatMetrics, args.CustomMetricsQuery)
+		obs := metrics.ObservabilityConfig{
+			EnableAvailabilityCheck: args.EnableAvailabilityCheck,
+			AvailabilityCheckQuery:  args.AvailabilityCheckQuery,
+			CollectQueryTelemetry:   args.CollectQueryTelemetry,
+		}
+		metrics.PopulateMetrics(connectionInfo, collectionList, instance, pgIntegration, args.Pgbouncer, args.CollectDbLockMetrics, args.CollectBloatMetrics, args.CustomMetricsQuery, obs)
 		if args.CustomMetricsConfig != "" {
 			metrics.PopulateCustomMetricsFromFile(connectionInfo, args.CustomMetricsConfig, pgIntegration)
 		}

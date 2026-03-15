@@ -12,6 +12,7 @@ import (
 	"github.com/newrelic/infra-integrations-sdk/v3/data/metric"
 	"github.com/newrelic/infra-integrations-sdk/v3/integration"
 	"github.com/newrelic/infra-integrations-sdk/v3/log"
+	"github.com/newrelic/nri-postgresql/src/availability"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
 	yaml "gopkg.in/yaml.v3"
@@ -21,6 +22,13 @@ const (
 	versionQuery = `SHOW server_version`
 )
 
+// ObservabilityConfig holds the optional APM-style observability settings passed to PopulateMetrics.
+type ObservabilityConfig struct {
+	EnableAvailabilityCheck bool
+	AvailabilityCheckQuery  string
+	CollectQueryTelemetry   bool
+}
+
 // PopulateMetrics collects metrics for each type
 func PopulateMetrics(
 	ci connection.Info,
@@ -28,14 +36,30 @@ func PopulateMetrics(
 	instance *integration.Entity,
 	i *integration.Integration,
 	collectPgBouncer, collectDbLocks, collectBloat bool,
-	customMetricsQuery string) {
+	customMetricsQuery string,
+	obs ObservabilityConfig) {
 
 	con, err := ci.NewConnection(ci.DatabaseName())
+
+	// Always publish a PostgresqlConnectionSample: it captures the implicit availability signal
+	// (did the connection succeed?) plus timing data when COLLECT_CONNECTION_TIMING is enabled.
+	publishConnectionSample(instance, con, err)
+
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
 		return
 	}
 	defer con.Close()
+
+	// Explicit availability check — runs a canary query to verify query execution works.
+	if obs.EnableAvailabilityCheck {
+		q := obs.AvailabilityCheckQuery
+		if q == "" {
+			q = availability.DefaultQuery
+		}
+		result := availability.ExplicitCheck(con, q)
+		publishAvailabilityCheckSample(instance, result)
+	}
 
 	version, err := CollectVersion(con)
 	if err != nil {
@@ -54,14 +78,121 @@ func PopulateMetrics(
 		PopulateCustomMetrics(customMetricsQuery, i, con, ci, instance)
 	}
 
+	// Drain and publish per-query telemetry accumulated during the collection above.
+	if obs.CollectQueryTelemetry {
+		publishQueryTelemetrySamples(instance, con.DrainTelemetry())
+	}
+
 	if collectPgBouncer {
-		con, err = ci.NewConnection("pgbouncer")
-		if err != nil {
-			log.Error("Error creating connection to pgbouncer database: %s", err)
+		pgbCon, pgbErr := ci.NewConnection("pgbouncer")
+		if pgbErr != nil {
+			log.Error("Error creating connection to pgbouncer database: %s", pgbErr)
 		} else {
-			defer con.Close()
-			PopulatePgBouncerMetrics(i, con, ci)
+			defer pgbCon.Close()
+			PopulatePgBouncerMetrics(i, pgbCon, ci)
+			if obs.CollectQueryTelemetry {
+				publishQueryTelemetrySamples(instance, pgbCon.DrainTelemetry())
+			}
 		}
+	}
+}
+
+// publishConnectionSample emits a PostgresqlConnectionSample capturing the implicit availability
+// signal (connection success/failure) and, when timing was collected, the connection phase timings.
+func publishConnectionSample(instance *integration.Entity, con *connection.PGSQLConnection, connErr error) {
+	ms := instance.NewMetricSet("PostgresqlConnectionSample",
+		attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
+		attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+	)
+
+	if connErr != nil {
+		if err := ms.SetMetric("db.available", 0, metric.GAUGE); err != nil {
+			log.Warn("Failed to set db.available metric: %s", err)
+		}
+		errCode, errMsg := connection.ClassifyError(connErr)
+		if err := ms.SetMetric("db.connection.errorCode", errCode, metric.ATTRIBUTE); err != nil {
+			log.Warn("Failed to set db.connection.errorCode: %s", err)
+		}
+		if err := ms.SetMetric("db.connection.errorMessage", errMsg, metric.ATTRIBUTE); err != nil {
+			log.Warn("Failed to set db.connection.errorMessage: %s", err)
+		}
+		return
+	}
+
+	if err := ms.SetMetric("db.available", 1, metric.GAUGE); err != nil {
+		log.Warn("Failed to set db.available metric: %s", err)
+	}
+
+	if con.Timing != nil {
+		t := con.Timing
+		setGauge(ms, "db.connection.dnsLookupMs", t.DNSLookupMs)
+		setGauge(ms, "db.connection.tcpConnectMs", t.TCPConnectMs)
+		setGauge(ms, "db.connection.tlsAndAuthMs", t.TLSAndAuthMs())
+		setGauge(ms, "db.connection.totalConnectMs", t.TotalConnectMs)
+	}
+}
+
+// publishAvailabilityCheckSample adds the explicit canary query results to the
+// PostgresqlConnectionSample entity as db.availabilityCheck.* fields.
+func publishAvailabilityCheckSample(instance *integration.Entity, result *availability.CheckResult) {
+	ms := instance.NewMetricSet("PostgresqlConnectionSample",
+		attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
+		attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+		attribute.Attribute{Key: "checkType", Value: "explicit"},
+	)
+
+	available := 0
+	if result.Available {
+		available = 1
+	}
+	setGauge(ms, "db.availabilityCheck.available", float64(available))
+	setGauge(ms, "db.availabilityCheck.durationMs", result.DurationMs)
+	if err := ms.SetMetric("db.availabilityCheck.query", result.Query, metric.ATTRIBUTE); err != nil {
+		log.Warn("Failed to set db.availabilityCheck.query: %s", err)
+	}
+	if result.ErrorCode != "" {
+		if err := ms.SetMetric("db.availabilityCheck.errorCode", result.ErrorCode, metric.ATTRIBUTE); err != nil {
+			log.Warn("Failed to set db.availabilityCheck.errorCode: %s", err)
+		}
+	}
+	if result.ErrorMessage != "" {
+		if err := ms.SetMetric("db.availabilityCheck.errorMessage", result.ErrorMessage, metric.ATTRIBUTE); err != nil {
+			log.Warn("Failed to set db.availabilityCheck.errorMessage: %s", err)
+		}
+	}
+}
+
+// publishQueryTelemetrySamples emits one PostgresqlQueryTelemetrySample per telemetry entry.
+func publishQueryTelemetrySamples(instance *integration.Entity, entries []*connection.QueryTelemetry) {
+	for _, t := range entries {
+		ms := instance.NewMetricSet("PostgresqlQueryTelemetrySample",
+			attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
+			attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+			attribute.Attribute{Key: "queryName", Value: t.QueryName},
+			attribute.Attribute{Key: "database", Value: t.Database},
+		)
+		setGauge(ms, "durationMs", t.DurationMs)
+		hasError := 0
+		if t.HasError {
+			hasError = 1
+		}
+		setGauge(ms, "hasError", float64(hasError))
+		if t.ErrorCode != "" {
+			if err := ms.SetMetric("errorCode", t.ErrorCode, metric.ATTRIBUTE); err != nil {
+				log.Warn("Failed to set errorCode: %s", err)
+			}
+		}
+		if t.ErrorMessage != "" {
+			if err := ms.SetMetric("errorMessage", t.ErrorMessage, metric.ATTRIBUTE); err != nil {
+				log.Warn("Failed to set errorMessage: %s", err)
+			}
+		}
+	}
+}
+
+func setGauge(ms *metric.Set, name string, val float64) {
+	if err := ms.SetMetric(name, val, metric.GAUGE); err != nil {
+		log.Warn("Failed to set metric %s: %s", name, err)
 	}
 }
 
