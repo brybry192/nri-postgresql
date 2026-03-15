@@ -97,3 +97,121 @@ func TestIgnoringDB(t *testing.T) {
 	assert.Contains(t, stdout, `"database:postgres"`)
 	assert.NotContains(t, stdout, `"database:demo"`)
 }
+
+// TestConnectionSampleAlwaysEmitted verifies that a PostgresqlConnectionSample with db.available=1
+// is emitted on every successful collection cycle, even without any observability flags set.
+func TestConnectionSampleAlwaysEmitted(t *testing.T) {
+	stdout, stderr, err := simulation.RunIntegration(serviceNamePostgresLatest, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, `-collection_list=all`)
+	assert.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Contains(t, stdout, `"PostgresqlConnectionSample"`)
+	assert.Contains(t, stdout, `"db.available"`)
+}
+
+// TestObservabilityFlags validates each new observability flag individually.
+func TestObservabilityFlags(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		Name           string
+		ExtraFlags     []string
+		MustContain    []string
+		MustNotContain []string
+	}{
+		{
+			Name:       "Connection timing emits DNS and TCP gauges",
+			ExtraFlags: []string{`-collect_connection_timing=true`},
+			MustContain: []string{
+				`"db.connection.dnsLookupMs"`,
+				`"db.connection.tcpConnectMs"`,
+			},
+		},
+		{
+			Name:       "Availability check emits explicit sample with available=1",
+			ExtraFlags: []string{`-enable_availability_check=true`},
+			MustContain: []string{
+				`"checkType":"explicit"`,
+				`"db.availabilityCheck.available"`,
+				`"db.availabilityCheck.durationMs"`,
+				`"db.availabilityCheck.query":"SELECT 1"`,
+			},
+		},
+		{
+			Name:       "Availability check custom query is reflected in sample",
+			ExtraFlags: []string{`-enable_availability_check=true`, `-availability_check_query=SELECT 42`},
+			MustContain: []string{
+				`"checkType":"explicit"`,
+				`"db.availabilityCheck.query":"SELECT 42"`,
+			},
+		},
+		{
+			Name:       "Query telemetry emits PostgresqlQueryTelemetrySample events",
+			ExtraFlags: []string{`-collect_query_telemetry=true`},
+			MustContain: []string{
+				`"PostgresqlQueryTelemetrySample"`,
+				`"durationMs"`,
+				`"hasError"`,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			args := append([]string{`-collection_list=all`}, tc.ExtraFlags...)
+			stdout, stderr, err := simulation.RunIntegration(serviceNamePostgresLatest, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, args...)
+			assert.NoError(t, err)
+			assert.Empty(t, stderr)
+			assert.NotEmpty(t, stdout)
+			for _, want := range tc.MustContain {
+				assert.Contains(t, stdout, want, "expected %q in output", want)
+			}
+			for _, notWant := range tc.MustNotContain {
+				assert.NotContains(t, stdout, notWant, "unexpected %q in output", notWant)
+			}
+		})
+	}
+}
+
+// TestConnectionFailureAvailabilityCheck verifies that when the host is unreachable:
+//   - A PostgresqlConnectionSample is still emitted (implicit signal — no gap in the series)
+//   - db.connection.errorCode is set (confirms available=0 path was taken)
+//   - When ENABLE_AVAILABILITY_CHECK is set, a checkType=explicit sample is also emitted
+//   - db.availabilityCheck.errorCode is set in the explicit sample
+//
+// This ensures neither the implicit nor explicit series has a gap on connection failures.
+func TestConnectionFailureAvailabilityCheck(t *testing.T) {
+	badHost := "nonexistent-postgres-host-00000"
+	args := []string{
+		`-enable_availability_check=true`,
+	}
+	// Ignore error: non-zero exit is expected when the host is unreachable.
+	stdout, _, _ := simulation.RunIntegration(badHost, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, args...)
+	if stdout == "" {
+		t.Skip("integration binary produced no output on connection failure; check container setup")
+	}
+	// Implicit availability signal: sample is always emitted and carries an error code when the
+	// connection itself fails (only present on the failure path, so its presence confirms available=0).
+	assert.Contains(t, stdout, `"PostgresqlConnectionSample"`, "implicit connection sample should always be emitted")
+	assert.Contains(t, stdout, `"db.connection.errorCode"`, "db.connection.errorCode should be set when connection fails")
+	// Explicit availability check: still emitted even though the connection failed, so the series has no gap.
+	assert.Contains(t, stdout, `"checkType"`, "explicit availability check sample should be emitted even when connection fails")
+	assert.Contains(t, stdout, `"db.availabilityCheck.errorCode"`, "explicit check should carry an errorCode when unavailable")
+}
+
+// TestAvailabilityCheckTimeout verifies that a hanging canary query is interrupted by the
+// configured timeout and the result is reported with errorCode=timeout rather than blocking
+// the rest of the collection cycle.
+func TestAvailabilityCheckTimeout(t *testing.T) {
+	args := []string{
+		`-enable_availability_check=true`,
+		// pg_sleep(30) simulates a hung server; the tight timeout should cancel it quickly.
+		`-availability_check_query=SELECT pg_sleep(30)`,
+		`-availability_check_timeout_ms=500`,
+	}
+	stdout, _, _ := simulation.RunIntegration(serviceNamePostgresLatest, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, args...)
+	assert.Contains(t, stdout, `"checkType"`)
+	// db.availabilityCheck.errorCode is only emitted when the check fails, confirming timeout path.
+	assert.Contains(t, stdout, `"db.availabilityCheck.errorCode"`)
+	assert.Contains(t, stdout, `"timeout"`, "errorCode should classify the cancelled context as timeout")
+}

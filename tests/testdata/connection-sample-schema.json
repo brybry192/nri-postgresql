@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["name", "protocol_version", "integration_version", "data"],
+  "properties": {
+    "name": { "type": "string" },
+    "protocol_version": { "type": "string" },
+    "integration_version": { "type": "string" },
+    "data": {
+      "type": "array",
+      "contains": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "required": ["event_type", "displayName", "entityName", "db.available"],
+              "properties": {
+                "event_type": { "type": "string", "const": "PostgresqlConnectionSample" },
+                "displayName": { "type": "string" },
+                "entityName": { "type": "string" },
+                "db.available": { "type": "number", "enum": [0, 1] },
+                "db.connection.dnsLookupMs": { "type": "number", "minimum": 0 },
+                "db.connection.tcpConnectMs": { "type": "number", "minimum": 0 },
+                "db.connection.errorCode": { "type": "string" },
+                "db.connection.errorMessage": { "type": "string" },
+                "checkType": { "type": "string" },
+                "db.availabilityCheck.available": { "type": "number", "enum": [0, 1] },
+                "db.availabilityCheck.durationMs": { "type": "number", "minimum": 0 },
+                "db.availabilityCheck.query": { "type": "string" },
+                "db.availabilityCheck.errorCode": { "type": "string" },
+                "db.availabilityCheck.errorMessage": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

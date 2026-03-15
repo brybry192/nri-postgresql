@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["name", "protocol_version", "integration_version", "data"],
+  "properties": {
+    "name": { "type": "string" },
+    "protocol_version": { "type": "string" },
+    "integration_version": { "type": "string" },
+    "data": {
+      "type": "array",
+      "contains": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "required": ["event_type", "displayName", "entityName", "durationMs", "hasError"],
+              "properties": {
+                "event_type": { "type": "string", "const": "PostgresqlQueryTelemetrySample" },
+                "displayName": { "type": "string" },
+                "entityName": { "type": "string" },
+                "queryName": { "type": "string" },
+                "database": { "type": "string" },
+                "durationMs": { "type": "number", "minimum": 0 },
+                "hasError": { "type": "number", "enum": [0, 1] },
+                "errorCode": { "type": "string" },
+                "errorMessage": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
