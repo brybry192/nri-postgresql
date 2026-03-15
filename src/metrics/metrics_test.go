@@ -792,6 +792,46 @@ func TestPublishConnectionSample_ConnectionError(t *testing.T) {
 	assert.NotContains(t, metrics, "db.connection.dnsLookupMs")
 }
 
+// TestPopulateMetrics_AvailabilityCheckEmittedOnConnectionFailure verifies that when the
+// connection itself fails and ENABLE_AVAILABILITY_CHECK is true, a checkType=explicit sample
+// is still emitted with available=0 and a classified error — so the metric series has no gap.
+func TestPopulateMetrics_AvailabilityCheckEmittedOnConnectionFailure(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	ci := &connection.MockInfo{}
+	ci.On("NewConnection", tmock.Anything).Return((*connection.PGSQLConnection)(nil), errors.New("connection refused"))
+
+	obs := ObservabilityConfig{
+		EnableAvailabilityCheck:    true,
+		AvailabilityCheckQuery:     "SELECT 1",
+		AvailabilityCheckTimeoutMs: 5000,
+	}
+	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs)
+
+	// Should have exactly two PostgresqlConnectionSample events:
+	// one implicit (db.available=0) and one explicit (checkType=explicit, available=0).
+	require.Len(t, instance.Metrics, 2)
+
+	var implicitSample, explicitSample map[string]interface{}
+	for _, ms := range instance.Metrics {
+		if ms.Metrics["checkType"] == "explicit" {
+			explicitSample = ms.Metrics
+		} else {
+			implicitSample = ms.Metrics
+		}
+	}
+
+	require.NotNil(t, implicitSample, "implicit connection sample missing")
+	assert.Equal(t, float64(0), implicitSample["db.available"])
+	assert.Equal(t, "connection_refused", implicitSample["db.connection.errorCode"])
+
+	require.NotNil(t, explicitSample, "explicit availability check sample missing")
+	assert.Equal(t, float64(0), explicitSample["db.availabilityCheck.available"])
+	assert.Equal(t, "connection_refused", explicitSample["db.availabilityCheck.errorCode"])
+	assert.Equal(t, "SELECT 1", explicitSample["db.availabilityCheck.query"])
+}
+
 func TestPublishConnectionSample_ConnectionError_AlwaysEmitsSample(t *testing.T) {
 	// A sample must always be emitted even on total connection failure so that
 	// New Relic alert conditions on db.available can fire.

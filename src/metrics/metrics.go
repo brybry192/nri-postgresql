@@ -50,6 +50,23 @@ func PopulateMetrics(
 
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
+		// When the connection itself fails and the availability check is enabled, emit an
+		// explicit check sample reflecting the connection error so the checkType=explicit
+		// series never has a gap — callers can alert on available=0 without special-casing
+		// missing data.
+		if obs.EnableAvailabilityCheck {
+			q := obs.AvailabilityCheckQuery
+			if q == "" {
+				q = availability.DefaultQuery
+			}
+			errCode, errMsg := connection.ClassifyError(err)
+			publishAvailabilityCheckSample(instance, &availability.CheckResult{
+				Available:    false,
+				Query:        q,
+				ErrorCode:    errCode,
+				ErrorMessage: errMsg,
+			})
+		}
 		return
 	}
 	defer con.Close()
@@ -57,6 +74,8 @@ func PopulateMetrics(
 	// Explicit availability check — runs a canary query to verify query execution works.
 	// A deadline context ensures the check cannot block past the configured timeout,
 	// preventing a slow/hung server from delaying the rest of the collection cycle.
+	// cancel() is called immediately after the check completes rather than deferred to
+	// end-of-function so the context timer is released before the rest of collection runs.
 	if obs.EnableAvailabilityCheck {
 		q := obs.AvailabilityCheckQuery
 		if q == "" {
@@ -67,8 +86,8 @@ func PopulateMetrics(
 			timeoutMs = 10000
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
-		defer cancel()
 		result := availability.ExplicitCheck(ctx, con, q)
+		cancel()
 		publishAvailabilityCheckSample(instance, result)
 	}
 
