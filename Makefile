@@ -32,7 +32,7 @@ test:
 
 integration-test:
 	@echo "=== $(INTEGRATION) === [ test ]: running integration tests..."
-	@docker compose -f tests/docker-compose.yml up -d
+	@docker compose -f tests/docker-compose.yml up -d --build
 	# Sleep added to allow postgres with test data and extensions to start up
 	@sleep 10
 	@go test -v -tags=integration -count 1 ./tests/postgresql_test.go -timeout 300s || (ret=$$?; docker compose -f tests/docker-compose.yml down -v && exit $$ret)

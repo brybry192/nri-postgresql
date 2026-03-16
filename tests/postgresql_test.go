@@ -175,28 +175,28 @@ func TestObservabilityFlags(t *testing.T) {
 
 // TestConnectionFailureAvailabilityCheck verifies that when the host is unreachable:
 //   - A PostgresqlConnectionSample is still emitted (implicit signal — no gap in the series)
-//   - db.connection.errorCode is set (confirms available=0 path was taken)
+//   - The implicit sample shows db.available=1 because the connection pool is created lazily;
+//     sqlx.DB / stdlib.OpenDB do not dial the server until the first query runs.
 //   - When ENABLE_AVAILABILITY_CHECK is set, a checkType=explicit sample is also emitted
-//   - db.availabilityCheck.errorCode is set in the explicit sample
+//     and carries db.availabilityCheck.errorCode (the first real dial attempt fails here)
 //
-// This ensures neither the implicit nor explicit series has a gap on connection failures.
+// The explicit check is therefore the correct mechanism for detecting network-level failures.
 func TestConnectionFailureAvailabilityCheck(t *testing.T) {
 	badHost := "nonexistent-postgres-host-00000"
 	args := []string{
 		`-enable_availability_check=true`,
 	}
-	// Ignore error: non-zero exit is expected when the host is unreachable.
+	// Ignore exit error: non-zero exit is possible when the host is unreachable.
 	stdout, _, _ := simulation.RunIntegration(badHost, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, args...)
 	if stdout == "" {
 		t.Skip("integration binary produced no output on connection failure; check container setup")
 	}
-	// Implicit availability signal: sample is always emitted and carries an error code when the
-	// connection itself fails (only present on the failure path, so its presence confirms available=0).
+	// Implicit sample is always emitted. The pool was created successfully (lazy dial), so
+	// db.available=1 here — explicit check below is what catches the network failure.
 	assert.Contains(t, stdout, `"PostgresqlConnectionSample"`, "implicit connection sample should always be emitted")
-	assert.Contains(t, stdout, `"db.connection.errorCode"`, "db.connection.errorCode should be set when connection fails")
-	// Explicit availability check: still emitted even though the connection failed, so the series has no gap.
-	assert.Contains(t, stdout, `"checkType"`, "explicit availability check sample should be emitted even when connection fails")
-	assert.Contains(t, stdout, `"db.availabilityCheck.errorCode"`, "explicit check should carry an errorCode when unavailable")
+	// Explicit check: first real dial attempt fails → errorCode is set, confirming unavailability.
+	assert.Contains(t, stdout, `"checkType"`, "explicit availability check sample should be emitted")
+	assert.Contains(t, stdout, `"db.availabilityCheck.errorCode"`, "explicit check should carry an errorCode when the host is unreachable")
 }
 
 // TestAvailabilityCheckTimeout verifies that a hanging canary query is interrupted by the

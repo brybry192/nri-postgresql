@@ -31,7 +31,9 @@ type PGSQLConnection struct {
 	connection *sqlx.DB
 	database   string
 	Timing     *ConnectionTiming // non-nil when COLLECT_CONNECTION_TIMING=true
-	telemetry  telemetryAccumulator
+	// telemetry is a pointer so that value-receiver method calls (which receive a copy of the
+	// struct) still accumulate into the same underlying storage as the original.
+	telemetry *telemetryAccumulator
 }
 
 // Info holds all the information needed from the user to create a new connection
@@ -85,10 +87,8 @@ func (ci *connectionInfo) NewConnection(database string) (*PGSQLConnection, erro
 	urlStr := createConnectionURL(ci, database)
 
 	pgConn := &PGSQLConnection{
-		database: database,
-		telemetry: telemetryAccumulator{
-			enabled: ci.CollectQueryTelemetry,
-		},
+		database:  database,
+		telemetry: &telemetryAccumulator{enabled: ci.CollectQueryTelemetry},
 	}
 
 	config, err := pgx.ParseConfig(urlStr)
@@ -102,14 +102,11 @@ func (ci *connectionInfo) NewConnection(database string) (*PGSQLConnection, erro
 		attachTimingDialFunc(config, timing)
 	}
 
-	connStr := stdlib.RegisterConnConfig(config)
-	defer stdlib.UnregisterConnConfig(connStr)
-
-	db, err := sqlx.Open("pgx", connStr)
-	if err != nil {
-		return nil, err
-	}
-	pgConn.connection = db
+	// OpenDB holds a reference to the parsed config directly — no global registry needed.
+	// Using RegisterConnConfig/UnregisterConnConfig would race: the deferred unregister fires
+	// when NewConnection returns, but sqlx.DB is lazy and the driver looks up the config on
+	// the first actual query, by which point the entry has already been removed.
+	pgConn.connection = sqlx.NewDb(stdlib.OpenDB(*config), "pgx")
 
 	return pgConn, nil
 }
@@ -132,7 +129,7 @@ func (p PGSQLConnection) Close() {
 // Query runs a query and loads results into v.
 // When CollectQueryTelemetry is enabled, execution time and any error are accumulated.
 func (p PGSQLConnection) Query(v interface{}, query string) error {
-	if p.telemetry.enabled {
+	if p.telemetry != nil && p.telemetry.enabled {
 		return p.timedSelect(v, query)
 	}
 	return p.connection.Select(v, query)
@@ -141,7 +138,7 @@ func (p PGSQLConnection) Query(v interface{}, query string) error {
 // QueryUnsafe runs a query and loads results into v, ignoring extra columns in the result set.
 // This is useful for queries where the schema may vary (e.g., PgBouncer versions).
 func (p PGSQLConnection) QueryUnsafe(v interface{}, query string) error {
-	if p.telemetry.enabled {
+	if p.telemetry != nil && p.telemetry.enabled {
 		return p.timedSelectUnsafe(v, query)
 	}
 	return p.connection.Unsafe().Select(v, query)
@@ -149,7 +146,7 @@ func (p PGSQLConnection) QueryUnsafe(v interface{}, query string) error {
 
 // Queryx runs a query and returns a set of rows.
 func (p PGSQLConnection) Queryx(query string) (*sqlx.Rows, error) {
-	if p.telemetry.enabled {
+	if p.telemetry != nil && p.telemetry.enabled {
 		start := time.Now()
 		rows, err := p.connection.Queryx(query)
 		p.telemetry.record(extractQueryName(query), p.database, time.Since(start), err)
@@ -162,7 +159,7 @@ func (p PGSQLConnection) Queryx(query string) (*sqlx.Rows, error) {
 // The context deadline is honoured by the driver, allowing callers to bound
 // query execution time (e.g. the availability check timeout).
 func (p PGSQLConnection) QueryxContext(ctx context.Context, query string) (*sqlx.Rows, error) {
-	if p.telemetry.enabled {
+	if p.telemetry != nil && p.telemetry.enabled {
 		start := time.Now()
 		rows, err := p.connection.QueryxContext(ctx, query)
 		p.telemetry.record(extractQueryName(query), p.database, time.Since(start), err)
