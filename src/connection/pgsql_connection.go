@@ -119,6 +119,13 @@ func (ci *connectionInfo) DatabaseName() string {
 	return ci.Database
 }
 
+// Ping verifies the connection to the database is still alive.
+// When CollectConnectionTiming is enabled, calling Ping before the first query
+// ensures the DialFunc fires and populates the Timing struct before it is read.
+func (p PGSQLConnection) Ping() error {
+	return p.connection.Ping()
+}
+
 // Close closes the PostgreSQL connection. If an error occurs it is logged as a warning.
 func (p PGSQLConnection) Close() {
 	if err := p.connection.Close(); err != nil {

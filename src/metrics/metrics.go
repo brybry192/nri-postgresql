@@ -26,6 +26,7 @@ const (
 
 // ObservabilityConfig holds the optional APM-style observability settings passed to PopulateMetrics.
 type ObservabilityConfig struct {
+	CollectConnectionTiming    bool
 	EnableAvailabilityCheck    bool
 	AvailabilityCheckQuery     string
 	AvailabilityCheckTimeoutMs int
@@ -44,12 +45,10 @@ func PopulateMetrics(
 
 	con, err := ci.NewConnection(ci.DatabaseName())
 
-	// Always publish a PostgresqlConnectionSample: it captures the implicit availability signal
-	// (did the connection succeed?) plus timing data when COLLECT_CONNECTION_TIMING is enabled.
-	publishConnectionSample(instance, con, err)
-
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
+		// Always emit the implicit connection sample so the series has no gap.
+		publishConnectionSample(instance, con, err)
 		// When the connection itself fails and the availability check is enabled, emit an
 		// explicit check sample reflecting the connection error so the checkType=explicit
 		// series never has a gap — callers can alert on available=0 without special-casing
@@ -71,11 +70,13 @@ func PopulateMetrics(
 	}
 	defer con.Close()
 
-	// Explicit availability check — runs a canary query to verify query execution works.
-	// A deadline context ensures the check cannot block past the configured timeout,
-	// preventing a slow/hung server from delaying the rest of the collection cycle.
-	// cancel() is called immediately after the check completes rather than deferred to
-	// end-of-function so the context timer is released before the rest of collection runs.
+	// Before publishing the implicit connection sample, ensure the pgx DialFunc has fired
+	// so that con.Timing carries real DNS/TCP values instead of zeros.
+	//
+	// When ENABLE_AVAILABILITY_CHECK is true the ExplicitCheck below triggers the dial.
+	// When only COLLECT_CONNECTION_TIMING is true we issue a lightweight Ping instead.
+	// Either way the order is: trigger dial → publishConnectionSample → everything else.
+	var explicitResult *availability.CheckResult
 	if obs.EnableAvailabilityCheck {
 		q := obs.AvailabilityCheckQuery
 		if q == "" {
@@ -86,9 +87,19 @@ func PopulateMetrics(
 			timeoutMs = 10000
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
-		result := availability.ExplicitCheck(ctx, con, q)
+		explicitResult = availability.ExplicitCheck(ctx, con, q)
 		cancel()
-		publishAvailabilityCheckSample(instance, result)
+	} else if obs.CollectConnectionTiming {
+		// No availability check — ping to trigger the DialFunc before reading con.Timing.
+		_ = con.Ping()
+	}
+
+	// Now con.Timing is populated (if CollectConnectionTiming is enabled), so the
+	// connection sample carries accurate DNS and TCP values.
+	publishConnectionSample(instance, con, err)
+
+	if explicitResult != nil {
+		publishAvailabilityCheckSample(instance, explicitResult)
 	}
 
 	version, err := CollectVersion(con)
