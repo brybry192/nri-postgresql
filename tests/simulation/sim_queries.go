@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/newrelic/infra-integrations-sdk/v3/log"
 	"github.com/stretchr/testify/require"
@@ -36,7 +36,7 @@ func openDB(targetContainer string) (*sqlx.DB, error) {
 
 	connectionURL.RawQuery = query.Encode()
 	dsn := connectionURL.String()
-	db, err := sqlx.Open("postgres", dsn)
+	db, err := sqlx.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to db: %s", err)
 	}
