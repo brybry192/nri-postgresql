@@ -1,0 +1,101 @@
+name: nri-postgresql-e2e
+
+services:
+
+  # ── Primary PostgreSQL ──────────────────────────────────────────────────────
+  e2e-postgres-1:
+    container_name: e2e-postgres-1
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-e2e_test_password}
+      POSTGRES_DB: ${PG_DB:-demo}
+    ports:
+      - "15432:5432"
+    command: >
+      postgres
+        -c wal_level=replica
+        -c max_wal_senders=3
+        -c max_replication_slots=3
+        -c hot_standby=on
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+      - ./init/primary:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Replica PostgreSQL ──────────────────────────────────────────────────────
+  e2e-postgres-2:
+    container_name: e2e-postgres-2
+    image: postgres:17
+    depends_on:
+      e2e-postgres-1:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-e2e_test_password}
+      POSTGRES_DB: ${PG_DB:-demo}
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "15433:5432"
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+      - ./init/replica/01-start-replication.sh:/docker-entrypoint-initdb.d/01-start-replication.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Inventory PostgreSQL (standalone) ───────────────────────────────────────
+  e2e-inventorydb:
+    container_name: pg-e2e-inventorydb
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-e2e_test_password}
+      POSTGRES_DB: inventory
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres-inventory-data:/var/lib/postgresql/data
+      - ./init/inventorydb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── New Relic Infrastructure Agent ──────────────────────────────────────────
+  # Built from the repo root so the Dockerfile can compile the current branch.
+  newrelic-infra:
+    container_name: pg-e2e-newrelic-infra
+    build:
+      context: ../../          # repo root
+      dockerfile: tests/e2e/Dockerfile.agent
+    depends_on:
+      e2e-postgres-1:
+        condition: service_healthy
+      e2e-postgres-2:
+        condition: service_healthy
+      e2e-inventorydb:
+        condition: service_healthy
+    environment:
+      NRIA_LICENSE_KEY: ${NR_LICENSE_KEY}
+      # Set to 1 for verbose agent logging (useful when first setting up).
+      NRIA_VERBOSE: 0
+    volumes:
+      - ./config/newrelic-infra.yml:/etc/newrelic-infra.yml:ro
+      - ./config/integrations.d/postgresql-local.yml:/etc/newrelic-infra/integrations.d/postgresql-local.yml:ro
+      - ./config/custom-queries.yml:/etc/newrelic-infra/custom-queries.yml:ro
+    cap_add:
+      - SYS_PTRACE
+    privileged: true
+
+volumes:
+  postgres-primary-data:
+  postgres-replica-data:
+  postgres-inventory-data:

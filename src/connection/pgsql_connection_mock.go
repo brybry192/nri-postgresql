@@ -18,6 +18,7 @@ func CreateMockSQL(t *testing.T) (con *PGSQLConnection, mock sqlmock.Sqlmock) {
 
 	con = &PGSQLConnection{
 		connection: sqlx.NewDb(mockDB, "sqlmock"),
+		telemetry:  &telemetryAccumulator{},
 	}
 
 	return

@@ -1,0 +1,38 @@
+---
+queries:
+
+  # Server identity — captures role and address so dashboards can detect failovers.
+  - query: >
+      SELECT
+        'pg.isInRecovery' AS metric_name,
+        'gauge' AS metric_type,
+        CASE WHEN pg_is_in_recovery() THEN 1 ELSE 0 END AS metric_value,
+        inet_server_addr()::text AS server_addr,
+        inet_server_port()::text AS server_port,
+        CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END AS server_role
+
+  # Replication lag on primary — one row per connected replica.
+  # Returns 0 rows on replicas (they have no pg_stat_replication entries).
+  - query: >
+      SELECT
+        'pg.replication.lagBytes' AS metric_name,
+        'gauge' AS metric_type,
+        COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0) AS metric_value,
+        client_addr::text AS replica_addr,
+        application_name AS replica_name,
+        state AS replication_state,
+        sync_state AS sync_mode
+      FROM pg_stat_replication
+
+  # WAL receiver on replica — confirms streaming is active.
+  # Returns 0 rows on primaries (they have no pg_stat_wal_receiver).
+  - query: >
+      SELECT
+        'pg.walReceiver.active' AS metric_name,
+        'gauge' AS metric_type,
+        CASE WHEN status = 'streaming' THEN 1 ELSE 0 END AS metric_value,
+        sender_host,
+        sender_port::text AS sender_port,
+        status AS receiver_status,
+        COALESCE(pg_wal_lsn_diff(latest_end_lsn, received_lsn), 0)::text AS pending_bytes
+      FROM pg_stat_wal_receiver

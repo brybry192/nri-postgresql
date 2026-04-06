@@ -1,0 +1,19 @@
+# Stage 1: compile nri-postgresql for Linux from the local source tree.
+# Build context is the repo root (docker-compose sets context: ../../).
+FROM golang:1.25.7-bookworm AS builder
+
+ARG CGO_ENABLED=0
+ARG GOOS=linux
+ARG GOARCH=amd64
+
+WORKDIR /go/src/github.com/newrelic/nri-postgresql
+COPY . .
+RUN go build -o bin/nri-postgresql ./src/
+
+# Stage 2: inject the custom binary into the official infra agent image.
+# The agent discovers integrations in /var/db/newrelic-infra/newrelic-integrations/bin/.
+FROM newrelic/infrastructure:latest
+
+COPY --from=builder \
+    /go/src/github.com/newrelic/nri-postgresql/bin/nri-postgresql \
+    /var/db/newrelic-infra/newrelic-integrations/bin/nri-postgresql
