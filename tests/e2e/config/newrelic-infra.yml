@@ -1,0 +1,17 @@
+# New Relic Infrastructure Agent configuration.
+# The license key is injected via the NRIA_LICENSE_KEY environment variable
+# in docker-compose.yml — nothing sensitive needs to go in this file.
+
+log:
+  level: info     # set to "debug" for very verbose agent output
+
+# Disable host metric samplers — we only care about the PostgreSQL integration,
+# and these samplers all fail on macOS/Rancher Desktop where /host/proc and
+# /host/sys are not available inside the container.
+metrics_system_sample_rate: -1
+metrics_storage_sample_rate: -1
+metrics_network_sample_rate: -1
+metrics_process_sample_rate: -1
+
+# Don't attempt cloud metadata detection (EC2/GCP/Azure probes time out on Mac).
+disable_cloud_metadata: true
