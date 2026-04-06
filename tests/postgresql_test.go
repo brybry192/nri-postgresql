@@ -98,10 +98,19 @@ func TestIgnoringDB(t *testing.T) {
 	assert.NotContains(t, stdout, `"database:demo"`)
 }
 
-// TestHealthSampleAlwaysEmitted verifies that a PostgresqlHealthSample with available=1
-// is emitted on every successful collection cycle, even without any observability flags set.
-func TestHealthSampleAlwaysEmitted(t *testing.T) {
+// TestNoHealthSampleWithoutFlags verifies that no PostgresqlHealthSample is emitted
+// when all observability flags are at their defaults (false). The feature is fully opt-in.
+func TestNoHealthSampleWithoutFlags(t *testing.T) {
 	stdout, stderr, err := simulation.RunIntegration(serviceNamePostgresLatest, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, `-collection_list=all`)
+	assert.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.NotContains(t, stdout, `"PostgresqlHealthSample"`)
+}
+
+// TestHealthSampleWithTimingFlag verifies that a PostgresqlHealthSample is emitted
+// when COLLECT_CONNECTION_TIMING is enabled.
+func TestHealthSampleWithTimingFlag(t *testing.T) {
+	stdout, stderr, err := simulation.RunIntegration(serviceNamePostgresLatest, integrationContainer, defaultBinaryPath, defaultUser, defaultPassword, defaultDB, `-collection_list=all`, `-collect_connection_timing=true`)
 	assert.NoError(t, err)
 	assert.Empty(t, stderr)
 	assert.Contains(t, stdout, `"PostgresqlHealthSample"`)

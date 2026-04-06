@@ -118,8 +118,7 @@ func GetSchemaFileName(sampleType string) string {
 		"PostgresBlockingSessions":     "blocking-sessions-schema.json",
 		"PostgresIndividualQueries":    "individual-queries-schema.json",
 		"PostgresExecutionPlanMetrics": "execution-plan-schema.json",
-		"PostgresqlConnectionSample":   "connection-sample-schema.json",
-		"PostgresqlQueryTelemetrySample": "query-telemetry-schema.json",
+		"PostgresqlHealthSample":       "connection-sample-schema.json",
 	}
 	return schemaMap[sampleType]
 }

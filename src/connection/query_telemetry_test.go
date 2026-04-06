@@ -350,7 +350,9 @@ func TestTimedSelect_RecordsError(t *testing.T) {
 	conn.telemetry.enabled = true
 	conn.database = "testdb"
 
-	var result []struct{ Val int `db:"val"` }
+	var result []struct {
+		Val int `db:"val"`
+	}
 	sqlMock.ExpectQuery(".*").WillReturnError(errors.New("connection refused"))
 
 	err := conn.timedSelect(&result, "SELECT val FROM t")
@@ -388,7 +390,9 @@ func TestTimedSelectUnsafe_RecordsError(t *testing.T) {
 	conn.telemetry.enabled = true
 	conn.database = "testdb"
 
-	var result []struct{ Val int `db:"val"` }
+	var result []struct {
+		Val int `db:"val"`
+	}
 	sqlMock.ExpectQuery(".*").WillReturnError(errors.New("EOF"))
 
 	err := conn.timedSelectUnsafe(&result, "SELECT val FROM t")

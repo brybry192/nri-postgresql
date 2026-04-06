@@ -1,9 +1,12 @@
+export PATH := $(PATH):$(GOPATH)/bin
+NATIVEOS    := $(shell go version | awk -F '[ /]' '{print $$4}')
+NATIVEARCH  := $(shell go version | awk -F '[ /]' '{print $$5}')
 INTEGRATION     := postgresql
+GOFLAGS          = -mod=readonly # ignore the vendor directory and to report an error if go.mod needs to be updated.
 BINARY_NAME      = nri-$(INTEGRATION)
 INTEGRATIONS_DIR = /var/db/newrelic-infra/newrelic-integrations/
 CONFIG_DIR       = /etc/newrelic-infra/integrations.d
 GO_FILES        := ./src/
-GOFLAGS          = -mod=readonly
 GO_VERSION 		?= $(shell grep '^go ' go.mod | awk '{print $$2}')
 BUILDER_IMAGE 	?= "ghcr.io/newrelic/coreint-automation:latest-go$(GO_VERSION)-ubuntu16.04"
 
@@ -11,35 +14,25 @@ all: build
 
 build: clean test compile
 
+build-container:
+	docker build -t nri-postgresql .
+
 clean:
 	@echo "=== $(INTEGRATION) === [ clean ]: Removing binaries and coverage file..."
-	@rm -rfv bin coverage.out coverage.html coverage.xml
+	@rm -rfv bin coverage.xml
 
 compile:
 	@echo "=== $(INTEGRATION) === [ compile ]: Building $(BINARY_NAME)..."
-	@go build -v -o bin/$(BINARY_NAME) $(GO_FILES)
+	@go build -o bin/$(BINARY_NAME) $(GO_FILES)
 
 test:
 	@echo "=== $(INTEGRATION) === [ test ]: running unit tests..."
-	@go test -race -coverprofile=coverage.out ./... -count=1
-	@go tool cover -func=coverage.out | tail -1
-
-test-verbose: test-debug
-test-debug:
-	@echo "=== $(INTEGRATION) === [ test-verbose ]: running unit tests with verbose output..."
-	@go test -v -race -coverprofile=coverage.out ./... -count=1
-	@go tool cover -func=coverage.out | tail -1
-
-test-coverage: test
-	@echo "=== $(INTEGRATION) === [ test-coverage ]: generating coverage report..."
-	@go tool cover -func=coverage.out
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "HTML coverage report: coverage.html"
+	@go test -race ./... -count=1
 
 
 integration-test:
 	@echo "=== $(INTEGRATION) === [ test ]: running integration tests..."
-	@docker compose -f tests/docker-compose.yml up -d --build
+	@docker compose -f tests/docker-compose.yml up -d
 	# Sleep added to allow postgres with test data and extensions to start up
 	@sleep 10
 	@go test -v -tags=integration -count 1 ./tests/postgresql_test.go -timeout 300s || (ret=$$?; docker compose -f tests/docker-compose.yml down -v && exit $$ret)
@@ -69,4 +62,4 @@ rt-update-changelog:
 include $(CURDIR)/build/ci.mk
 include $(CURDIR)/build/release.mk
 
-.PHONY: all build clean compile test test-verbose test-debug test-coverage integration-test install rt-update-changelog
+.PHONY: all build clean compile test integration-test install rt-update-changelog

@@ -12,8 +12,8 @@ import (
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	tmock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/DATA-DOG/go-sqlmock.v1"
 )
 

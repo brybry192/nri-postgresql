@@ -11,13 +11,13 @@ The branch adds four new optional flags (all `false` by default):
 
 | Flag | What it reports | Event type |
 |---|---|---|
-| `COLLECT_CONNECTION_TIMING` | DNS lookup + TCP connect time per cycle | `PostgresqlConnectionSample` |
-| `ENABLE_AVAILABILITY_CHECK` | Canary query result + duration + error code | `PostgresqlConnectionSample` (checkType=explicit) |
+| `COLLECT_CONNECTION_TIMING` | DNS lookup + TCP connect time per cycle | `PostgresqlHealthSample` (checkType=implicit) |
+| `ENABLE_AVAILABILITY_CHECK` | Canary query result + duration + error code | `PostgresqlHealthSample` (checkType=explicit) |
 | `AVAILABILITY_CHECK_TIMEOUT_MS` | Bounds the canary query so it can't block the next cycle | — |
-| `COLLECT_QUERY_TELEMETRY` | Per-internal-query duration + error code | `PostgresqlQueryTelemetrySample` |
+| `COLLECT_QUERY_TELEMETRY` | Per-internal-query duration + error code | `PostgresqlHealthSample` (checkType=query) |
 
-`PostgresqlConnectionSample` (implicit, always emitted) also gains `db.available: 0|1`
-on every cycle regardless of which flags are set.
+Health samples are only emitted when at least one observability flag is enabled.
+With no flags set, the integration produces identical output to the upstream baseline.
 
 ---
 
@@ -81,12 +81,12 @@ make run-once
 ```
 
 Look for:
-- `"event_type": "PostgresqlConnectionSample"` — appears twice per cycle:
+- `"event_type": "PostgresqlHealthSample"` — appears twice per cycle:
   once without `checkType` (implicit) and once with `"checkType": "explicit"`
 - `"db.available": 1` in the implicit sample
 - `"db.availabilityCheck.available": 1` in the explicit sample
 - `"db.connection.dnsLookupMs"` and `"db.connection.tcpConnectMs"` (timing)
-- `"event_type": "PostgresqlQueryTelemetrySample"` — one entry per internal
+- `"event_type": "PostgresqlHealthSample"` — one entry per internal
   monitoring query (version query, bgwriter stats, database stats, etc.)
 
 ### 4. Watch agent logs
@@ -110,7 +110,7 @@ Allow 1–2 minutes for the first data points to appear, then open
 #### Implicit availability signal (always emitted)
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT db.available, displayName, entityName
 WHERE db.available IS NOT NULL
   AND checkType IS NULL
@@ -123,7 +123,7 @@ LIMIT 20
 #### Explicit availability check
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT
   db.availabilityCheck.available,
   db.availabilityCheck.durationMs,
@@ -141,7 +141,7 @@ LIMIT 20
 #### Connection timing
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT
   db.connection.dnsLookupMs,
   db.connection.tcpConnectMs,
@@ -157,7 +157,7 @@ for local docker is normal; the DNS and TCP happen on first connect each cycle).
 #### Query telemetry
 
 ```sql
-FROM PostgresqlQueryTelemetrySample
+FROM PostgresqlHealthSample
 SELECT
   queryName,
   database,
@@ -174,7 +174,7 @@ BGWRITER_STATS, DATABASE_STATS, etc.). All should have `hasError = 0`.
 To see timing distribution:
 
 ```sql
-FROM PostgresqlQueryTelemetrySample
+FROM PostgresqlHealthSample
 SELECT average(durationMs), max(durationMs), count(*)
 FACET queryName
 SINCE 1 hour ago
@@ -183,7 +183,7 @@ SINCE 1 hour ago
 #### Availability check over time (alerting use case)
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT latest(db.availabilityCheck.available)
 WHERE checkType = 'explicit'
 FACET displayName
@@ -215,7 +215,7 @@ docker compose stop postgres
 Wait up to 30s (one integration cycle), then query:
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT db.availabilityCheck.available, db.availabilityCheck.errorCode
 WHERE checkType = 'explicit'
 SINCE 5 minutes ago
@@ -293,7 +293,7 @@ Same NRQL queries as above. The `displayName` will be the Aurora endpoint
 rather than `postgres:5432`, so filter by that:
 
 ```sql
-FROM PostgresqlConnectionSample
+FROM PostgresqlHealthSample
 SELECT *
 WHERE displayName LIKE '%rds.amazonaws.com%'
 SINCE 10 minutes ago

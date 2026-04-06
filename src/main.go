@@ -16,8 +16,6 @@ import (
 	"github.com/newrelic/nri-postgresql/src/connection"
 	"github.com/newrelic/nri-postgresql/src/inventory"
 	"github.com/newrelic/nri-postgresql/src/metrics"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -43,7 +41,7 @@ func main() {
 	if args.ShowVersion {
 		fmt.Printf(
 			"New Relic %s integration Version: %s, Platform: %s, GoVersion: %s, GitCommit: %s, BuildDate: %s\n",
-			cases.Title(language.Und).String(strings.Replace(integrationName, "com.newrelic.", "", 1)),
+			strings.Title(strings.Replace(integrationName, "com.newrelic.", "", 1)),
 			integrationVersion,
 			fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 			runtime.Version(),

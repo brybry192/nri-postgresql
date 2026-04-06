@@ -49,12 +49,11 @@ func PopulateMetrics(
 
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
-		// Always emit the implicit health sample so the series has no gap.
-		publishImplicitHealthSample(instance, con, err)
-		// When the connection itself fails and the availability check is enabled, emit an
-		// explicit health sample reflecting the connection error so the checkType=explicit
-		// series never has a gap — callers can alert on available=0 without special-casing
-		// missing data.
+		// Emit health samples on connection failure only when observability is enabled,
+		// so there is no gap in the time series for alerting.
+		if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+			publishImplicitHealthSample(instance, con, err)
+		}
 		if obs.EnableAvailabilityCheck {
 			q := obs.AvailabilityCheckQuery
 			if q == "" {
@@ -92,10 +91,6 @@ func PopulateMetrics(
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 		explicitResult = availability.ExplicitCheck(ctx, con, q)
 		cancel()
-		// Derive the implicit availability signal from the explicit check result so
-		// the implicit sample reflects real reachability, not just lazy-pool creation.
-		// Use ClassifiedError so ClassifyError passes through the already-classified
-		// code and message without re-classification.
 		if !explicitResult.Available {
 			connErr = &connection.ClassifiedError{Code: explicitResult.ErrorCode, Msg: explicitResult.ErrorMessage}
 		}
@@ -104,9 +99,11 @@ func PopulateMetrics(
 		connErr = con.Ping()
 	}
 
-	// Now con.Timing is populated (if CollectConnectionTiming is enabled), so the
-	// health sample carries accurate DNS and TCP values.
-	publishImplicitHealthSample(instance, con, connErr)
+	// Emit health samples only when at least one observability flag is active.
+	// With no flags set, the integration produces identical output to the upstream baseline.
+	if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+		publishImplicitHealthSample(instance, con, connErr)
+	}
 
 	if explicitResult != nil {
 		publishExplicitHealthSample(instance, explicitResult)

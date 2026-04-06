@@ -11,9 +11,9 @@ Unreleased section should follow [Release Toolkit](https://github.com/newrelic/r
 
 ### 🚀 Enhancements
 - Migrated database driver from `github.com/lib/pq` (maintenance mode) to `github.com/jackc/pgx/v5`, unlocking connection lifecycle hooks required for the observability features below
-- Added `COLLECT_CONNECTION_TIMING` flag: measures DNS lookup and TCP connect time via the connection's DialFunc, reported as `db.connection.dnsLookupMs` and `db.connection.tcpConnectMs` in `PostgresqlConnectionSample`; no extra round-trip is issued — timing is captured on the first query of each cycle
-- Added `ENABLE_AVAILABILITY_CHECK`, `AVAILABILITY_CHECK_QUERY`, and `AVAILABILITY_CHECK_TIMEOUT_MS` flags: runs a configurable canary query (default `SELECT 1`) each cycle to verify the server can process queries, with a deadline context to prevent a hung check from blocking the next cycle; results reported as `db.availabilityCheck.*` in `PostgresqlConnectionSample` with `checkType=explicit`
-- Added `COLLECT_QUERY_TELEMETRY` flag: emits one `PostgresqlQueryTelemetrySample` event per internal monitoring query per run, with duration, error status, and structured error classification
+- Added `COLLECT_CONNECTION_TIMING` flag: measures DNS lookup, TCP connect, and TLS handshake time via the connection's DialFunc, reported as `dnsLookupMs`, `tcpConnectMs`, and `tlsHandshakeMs` in `PostgresqlHealthSample` with `checkType=implicit`; no extra round-trip is issued — timing is captured on the first query of each cycle
+- Added `ENABLE_AVAILABILITY_CHECK`, `AVAILABILITY_CHECK_QUERY`, and `AVAILABILITY_CHECK_TIMEOUT_MS` flags: runs a configurable canary query (default `SELECT 1`) each cycle to verify the server can process queries, with a deadline context to prevent a hung check from blocking the next cycle; results reported in `PostgresqlHealthSample` with `checkType=explicit`
+- Added `COLLECT_QUERY_TELEMETRY` flag: emits one `PostgresqlHealthSample` event (with `checkType=query`) per internal monitoring query per run, with duration, error status, and structured error classification
 - All new flags default to `false` — no change in behavior unless explicitly enabled
 
 ## v2.25.0 - 2026-02-18
