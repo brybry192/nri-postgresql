@@ -1,0 +1,140 @@
+integrations:
+
+  # ── Primary ─────────────────────────────────────────────────────────────────
+  # Full observability: connection timing + explicit availability check + query telemetry.
+  - name: nri-postgresql
+    env:
+      USERNAME: postgres
+      PASSWORD: e2e_test_password
+      HOSTNAME: e2e-postgres-1
+      PORT: "5432"
+      DATABASE: demo
+      COLLECTION_LIST: 'ALL'
+
+      COLLECT_DB_LOCK_METRICS: "false"
+      COLLECT_BLOAT_METRICS: "true"
+      ENABLE_SSL: "false"
+
+      COLLECT_CONNECTION_TIMING: "true"
+      ENABLE_AVAILABILITY_CHECK: "true"
+      AVAILABILITY_CHECK_QUERY: "SELECT 1"
+      AVAILABILITY_CHECK_TIMEOUT_MS: "5000"
+      COLLECT_QUERY_TELEMETRY: "true"
+
+    interval: 10s
+    labels:
+      team: platform
+      service_type: postgresql
+      environment: e2e-local
+      region: local-1
+      geo: local
+      instance: e2e-postgres-1
+      role: primary
+      availability_zone: local-1a
+      service_name: demo-primary
+
+  # ── Replica ─────────────────────────────────────────────────────────────────
+  # Full observability including explicit availability check — the explicit
+  # check path uses a bounded context timeout, which is more reliable for
+  # detecting paused/frozen containers than bare Ping().
+  - name: nri-postgresql
+    env:
+      USERNAME: postgres
+      PASSWORD: e2e_test_password
+      HOSTNAME: e2e-postgres-2
+      PORT: "5432"
+      DATABASE: demo
+      COLLECTION_LIST: 'ALL'
+
+      COLLECT_DB_LOCK_METRICS: "false"
+      COLLECT_BLOAT_METRICS: "true"
+      ENABLE_SSL: "false"
+
+      COLLECT_CONNECTION_TIMING: "true"
+      ENABLE_AVAILABILITY_CHECK: "true"
+      AVAILABILITY_CHECK_QUERY: "SELECT 1"
+      AVAILABILITY_CHECK_TIMEOUT_MS: "5000"
+      COLLECT_QUERY_TELEMETRY: "true"
+
+    interval: 10s
+    labels:
+      team: platform
+      service_type: postgresql
+      environment: e2e-local
+      region: local-1
+      geo: local
+      instance: e2e-postgres-2
+      role: replica
+      availability_zone: local-1b
+      service_name: demo-replica
+
+  # ── Inventory DB ────────────────────────────────────────────────────────────
+  # Separate service_name — validates multi-instance monitoring with its own
+  # explicit availability check.
+  - name: nri-postgresql
+    env:
+      USERNAME: postgres
+      PASSWORD: e2e_test_password
+      HOSTNAME: e2e-inventorydb
+      PORT: "5432"
+      DATABASE: inventory
+      COLLECTION_LIST: 'ALL'
+
+      COLLECT_DB_LOCK_METRICS: "false"
+      COLLECT_BLOAT_METRICS: "true"
+      ENABLE_SSL: "false"
+
+      COLLECT_CONNECTION_TIMING: "true"
+      ENABLE_AVAILABILITY_CHECK: "true"
+      AVAILABILITY_CHECK_QUERY: "SELECT 1"
+      AVAILABILITY_CHECK_TIMEOUT_MS: "5000"
+      COLLECT_QUERY_TELEMETRY: "true"
+
+    interval: 10s
+    labels:
+      team: platform
+      service_type: postgresql
+      environment: e2e-local
+      region: local-1
+      geo: local
+      instance: e2e-inventorydb
+      role: primary
+      availability_zone: local-1c
+      service_name: inventory
+
+  # ── Chaos-check instance ────────────────────────────────────────────────────
+  # Points at the primary with e2e_canary() as the health check query. The
+  # function returns 1 instantly by default. The chaos test script activates
+  # a sleep window (UPDATE e2e_chaos SET sleep_seconds = 5) so there is time
+  # to find and kill the backend via pg_cancel/pg_terminate_backend. After
+  # the test, sleep_seconds is reset to 0 for clean metrics.
+  - name: nri-postgresql
+    env:
+      USERNAME: postgres
+      PASSWORD: e2e_test_password
+      HOSTNAME: e2e-postgres-1
+      PORT: "5432"
+      DATABASE: demo
+      COLLECTION_LIST: '{}'
+
+      COLLECT_DB_LOCK_METRICS: "false"
+      COLLECT_BLOAT_METRICS: "false"
+      ENABLE_SSL: "false"
+
+      COLLECT_CONNECTION_TIMING: "true"
+      ENABLE_AVAILABILITY_CHECK: "true"
+      AVAILABILITY_CHECK_QUERY: "SELECT e2e_canary()"
+      AVAILABILITY_CHECK_TIMEOUT_MS: "8000"
+      COLLECT_QUERY_TELEMETRY: "true"
+
+    interval: 10s
+    labels:
+      team: platform
+      service_type: postgresql
+      environment: e2e-local
+      region: local-1
+      geo: local
+      instance: e2e-slowcheck
+      role: primary
+      availability_zone: local-1a
+      service_name: demo-slowcheck

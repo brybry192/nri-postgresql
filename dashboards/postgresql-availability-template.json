@@ -1,0 +1,682 @@
+{
+  "name": "PostgreSQL Availability",
+  "description": null,
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "PostgreSQL Availability",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Database Availability Uptime %",
+          "description": "Availability (available) is a point-in-time signal: \"can I reach this database right now?\" It's a binary 0 or 1 captured each collection cycle.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 3,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET label.instance"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Health Check Error Rate",
+          "description": "Error rate across all check types (implicit, explicit, query). A non-zero rate indicates connectivity, auth, or query issues.",
+          "layout": {
+            "column": 4,
+            "row": 1,
+            "width": 1,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE hasError = 1) AS 'Error Rate %' FROM PostgresqlHealthSample WHERE label.instance IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}})"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 0.01
+                },
+                {
+                  "from": 0.01,
+                  "severity": "warning",
+                  "to": 0.05
+                },
+                {
+                  "from": 0.05,
+                  "severity": "critical",
+                  "to": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "DB Fleet Status",
+          "description": "How many instances are reporting and their current availability state.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT uniqueCount(label.instance) as 'total instances', filter(uniqueCount(label.instance), WHERE available = 1) AS 'up', filter(uniqueCount(label.instance), WHERE available = 0) AS 'down' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) SINCE 10 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": null,
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 12
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Database Availability & Uptime\n---\n\n#### Availability\nA **point-in-time** signal captured each collection cycle: *can I reach this database right now?*\n\nAll checks emit `PostgresqlHealthSample` with a `checkType` attribute:\n\n| checkType | Method | What it proves |\n|---|---|---|\n| **implicit** | PostgreSQL protocol ping | Server is listening and responds at the wire level |\n| **explicit** | Canary SQL query (e.g. `SELECT 1`) | Query parser, execution engine, and auth layer are functional |\n| **query** | Internal monitoring queries | Individual query health and duration |\n\n> Implicit is lightweight but won't catch connection exhaustion or permission issues. Explicit exercises the full query path.\n\n---\n\n#### Uptime %\nAvailability **aggregated over a time window** \u2014 what fraction of checks succeeded?\n\nUptime % = (successful checks / total checks) \u00d7 100\n\nAt a **10s interval** over 5 minutes \u2248 30 checks. If 1 fails \u2192 **96.7% uptime**.\n\n> **Important:** These checks measure availability from the integration\u2019s perspective using a single monitoring user. Not every error means the database is down for all consumers. For example, a `pg_error_28` (authentication failure) may indicate a credential issue specific to the monitoring user while the database remains fully available to application traffic. This makes availability monitoring a strong proxy for uptime, but not a guarantee \u2014 treat it as one signal alongside application-level health checks.\n\n---\n\n#### Connection Timing (implicit only)\n\n| Metric | Definition |\n|---|---|\n| **`dnsLookupMs`** | Time to resolve the hostname to an IP via DNS |\n| **`tcpConnectMs`** | Time for the TCP three-way handshake to the resolved IP |\n| **`tlsHandshakeMs`** | Time for the TLS/SSL negotiation (only when SSL is enabled) |\n\n> A spike in DNS or TCP time indicates infrastructure issues, not PostgreSQL. A spike in `tlsHandshakeMs` suggests certificate chain or negotiation issues. A spike in `durationMs` with normal connection timing suggests PostgreSQL-level contention.\n\n---\n\n#### Error Codes\n\nSee [PostgreSQL Error Codes](https://www.postgresql.org/docs/current/errcodes-appendix.html) for full SQLSTATE reference.\n\n| Code | Cause |\n|---|---|\n| `timeout` | Query or connection exceeded deadline |\n| `pg_error_28` | Authentication failure ([SQLSTATE class 28](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `pg_error_42` | Syntax / permission error ([SQLSTATE class 42](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `pg_error_57` | Query canceled / admin shutdown ([SQLSTATE class 57](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `connection_refused` | Server not listening |\n| `dns_resolution_failed` | Hostname cannot be resolved |\n| `tls_error` | Certificate or TLS handshake failure |\n\n---\n\n#### Resources\n- [PostgreSQL SSL/TLS Support](https://www.postgresql.org/docs/current/ssl-tcp.html)\n- [PostgreSQL Error Codes](https://www.postgresql.org/docs/current/errcodes-appendix.html)\n- [pg_stat_activity](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW)\n- [nri-postgresql Integration](https://docs.newrelic.com/docs/infrastructure/host-integrations/host-integrations-list/postgresql-monitoring-integration/)\n- [NRQL Reference](https://docs.newrelic.com/docs/nrql/get-started/introduction-nrql-new-relics-query-language/)\n"
+          }
+        },
+        {
+          "title": "Uptime % Over Time",
+          "description": "Database Availability by Instance over time",
+          "layout": {
+            "column": 1,
+            "row": 2,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "markers": {
+              "displayedTypes": {
+                "annotations": true,
+                "criticalViolations": false,
+                "deployments": true,
+                "relatedDeployments": true,
+                "warningViolations": false
+              }
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET label.instance"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": {
+              "isLabelVisible": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            },
+            "yAxisRight": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Response Time Max ms (DNS + TCP + TLS + Total)",
+          "description": "Connection phase breakdown: DNS resolution, TCP handshake, TLS negotiation, and total query duration across implicit and explicit checks.",
+          "layout": {
+            "column": 5,
+            "row": 2,
+            "width": 4,
+            "height": 4
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT max(dnsLookupMs) AS 'dnsLookup', max(tcpConnectMs) AS 'tcpConnect', max(tlsHandshakeMs) AS 'tlsHandshake', max(durationMs) AS 'total' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET label.instance"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Slowest Internal Queries \u2014 avg (ms)",
+          "description": "Top internal monitoring queries by average duration. High values may indicate PostgreSQL server pressure.",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT average(durationMs) AS 'avg' FROM PostgresqlHealthSample WHERE checkType = 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET queryName LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Query Duration Over Time \u2014 avg (ms)",
+          "description": "Internal monitoring query performance trends. Spikes correlate with PostgreSQL load.",
+          "layout": {
+            "column": 5,
+            "row": 6,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT average(durationMs) AS 'avg', percentile(durationMs, 95) AS 'p95' FROM PostgresqlHealthSample WHERE checkType = 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.instance TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Availability by Service",
+          "description": "Uptime grouped by service_name \u2014 useful for comparing health across deploys.",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.service_name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Availability by AZ",
+          "description": "Uptime grouped by availability zone \u2014 surfaces zone-specific outages.",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.availability_zone"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Errors Over Time",
+          "description": "Error count by classified error code across all check types.",
+          "layout": {
+            "column": 1,
+            "row": 9,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) FROM PostgresqlHealthSample WHERE hasError = 1 AND label.instance IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode, label.instance TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Error Breakdown",
+          "description": "Distribution of errors by type.",
+          "layout": {
+            "column": 5,
+            "row": 9,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) FROM PostgresqlHealthSample WHERE hasError = 1 AND label.instance IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Recent Errors",
+          "description": "Most recent error per unique error code combination.",
+          "layout": {
+            "column": 1,
+            "row": 11,
+            "width": 8,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT latest(errorMessage), latest(durationMs), latest(checkType) FROM PostgresqlHealthSample WHERE hasError = 1 AND label.instance IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode, label.instance"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Health Check Configuration",
+          "description": "Active check types and canary queries per monitored instance.",
+          "layout": {
+            "column": 1,
+            "row": 13,
+            "width": 8,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT latest(query), latest(label.role), latest(label.service_name), latest(label.availability_zone), latest(label.environment), latest(database) FROM PostgresqlHealthSample WHERE label.instance IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.instance SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "instance",
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          0
+        ],
+        "query": "SELECT uniques(label.instance) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "title": "Instance",
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          0
+        ],
+        "query": "SELECT uniques(label.service_name) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "service_name",
+      "title": "Service"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          0
+        ],
+        "query": "SELECT uniques(label.role) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "role",
+      "title": "Role"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          0
+        ],
+        "query": "SELECT uniques(checkType) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "checkType",
+      "title": "Check Type"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          0
+        ],
+        "query": "SELECT uniques(label.environment) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "environment",
+      "title": "Environment"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# Aurora / remote PostgreSQL override.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.aurora.yml up -d
+#
+# This file:
+#   - Drops the local postgres services (not needed when hitting a remote instance)
+#   - Swaps the integration config to use the aurora config file
+#   - Removes the healthcheck dependencies from the agent
+#
+# Required env vars in .env (see .env.example):
+#   AURORA_HOST, AURORA_PORT, AURORA_USER, AURORA_PASSWORD, AURORA_DB, AURORA_SSL
+
+services:
+
+  # Disable all local postgres containers — not needed for Aurora testing.
+  e2e-postgres-1:
+    profiles:
+      - disabled
+
+  e2e-postgres-2:
+    profiles:
+      - disabled
+
+  e2e-inventorydb:
+    profiles:
+      - disabled
+
+  newrelic-infra:
+    depends_on: {}     # remove dependency on the now-disabled local containers
+    volumes:
+      - ./config/newrelic-infra.yml:/etc/newrelic-infra.yml:ro
+      - ./config/integrations.d/postgresql-aurora.yml:/etc/newrelic-infra/integrations.d/postgresql-aurora.yml:ro
+    # Aurora is external — containers use the host's default DNS/routing.
+    # If you're on a VPN that only routes through the host, uncomment:
+    # network_mode: host

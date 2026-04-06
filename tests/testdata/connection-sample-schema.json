@@ -26,6 +26,7 @@
                 "durationMs": { "type": "number", "minimum": 0 },
                 "dnsLookupMs": { "type": "number", "minimum": 0 },
                 "tcpConnectMs": { "type": "number", "minimum": 0 },
+                "tlsHandshakeMs": { "type": "number", "minimum": 0 },
                 "query": { "type": "string" },
                 "errorCode": { "type": "string" },
                 "errorMessage": { "type": "string" }
