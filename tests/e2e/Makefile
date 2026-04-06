@@ -18,6 +18,7 @@ help:
 	@echo "    make test-availability  chaos test: trigger real failure scenarios (~6 min)"
 	@echo "    make test-fast          same as above but 1 cycle per phase (~2 min)"
 	@echo "    make test-chaos         full lifecycle: up, 10m warmup, chaos, 10m cooldown, down"
+	@echo "    make generate-load      run read/write workload for 60s (DURATION=N WORKERS=N)"
 	@echo ""
 	@echo "  Aurora / remote PostgreSQL testing:"
 	@echo "    make up-aurora          start infra agent only (no local postgres)"
@@ -180,6 +181,12 @@ test-chaos:
 	@echo ""; echo "Cooling down — collecting recovery data for $${COOLDOWN:-600}s..."; sleep $${COOLDOWN:-600}
 	$(MAKE) down
 	@echo ""; echo "Done."
+
+# Generate a mixed read/write workload to populate dashboard metrics.
+# Override duration (seconds) and parallelism with DURATION and WORKERS.
+.PHONY: generate-load
+generate-load:
+	@./generate-load.sh
 
 # ── Aurora stack ─────────────────────────────────────────────────────────────
 

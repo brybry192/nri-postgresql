@@ -10,6 +10,7 @@ integrations:
       PORT: "5432"
       DATABASE: demo
       COLLECTION_LIST: 'ALL'
+      REMOTE_MONITORING: "true"
 
       COLLECT_DB_LOCK_METRICS: "false"
       COLLECT_BLOAT_METRICS: "true"
@@ -45,6 +46,7 @@ integrations:
       PORT: "5432"
       DATABASE: demo
       COLLECTION_LIST: 'ALL'
+      REMOTE_MONITORING: "true"
 
       COLLECT_DB_LOCK_METRICS: "false"
       COLLECT_BLOAT_METRICS: "true"
@@ -79,6 +81,7 @@ integrations:
       PORT: "5432"
       DATABASE: inventory
       COLLECTION_LIST: 'ALL'
+      REMOTE_MONITORING: "true"
 
       COLLECT_DB_LOCK_METRICS: "false"
       COLLECT_BLOAT_METRICS: "true"
@@ -116,6 +119,7 @@ integrations:
       PORT: "5432"
       DATABASE: demo
       COLLECTION_LIST: '{}'
+      REMOTE_MONITORING: "true"
 
       COLLECT_DB_LOCK_METRICS: "false"
       COLLECT_BLOAT_METRICS: "false"
