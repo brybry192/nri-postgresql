@@ -766,8 +766,9 @@ func TestPublishImplicitHealthSample_Available_WithTiming(t *testing.T) {
 
 	conn, _ := connection.CreateMockSQL(t)
 	conn.Timing = &connection.ConnectionTiming{
-		DNSLookupMs:  5.0,
-		TCPConnectMs: 10.0,
+		DNSLookupMs:    5.0,
+		TCPConnectMs:   10.0,
+		TLSHandshakeMs: 15.0,
 	}
 
 	publishImplicitHealthSample(instance, conn, nil)
@@ -778,6 +779,26 @@ func TestPublishImplicitHealthSample_Available_WithTiming(t *testing.T) {
 	assert.Equal(t, 0.0, metrics["hasError"])
 	assert.Equal(t, 5.0, metrics["dnsLookupMs"])
 	assert.Equal(t, 10.0, metrics["tcpConnectMs"])
+	assert.Equal(t, 15.0, metrics["tlsHandshakeMs"])
+}
+
+func TestPublishImplicitHealthSample_NoTLSTiming(t *testing.T) {
+	testIntegration, _ := integration.New("test", "test")
+	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
+
+	conn, _ := connection.CreateMockSQL(t)
+	conn.Timing = &connection.ConnectionTiming{
+		DNSLookupMs:  5.0,
+		TCPConnectMs: 10.0,
+	}
+
+	publishImplicitHealthSample(instance, conn, nil)
+
+	require.Len(t, instance.Metrics, 1)
+	metrics := instance.Metrics[0].Metrics
+	assert.Equal(t, 5.0, metrics["dnsLookupMs"])
+	assert.Equal(t, 10.0, metrics["tcpConnectMs"])
+	assert.Nil(t, metrics["tlsHandshakeMs"], "tlsHandshakeMs should not be present when TLS is not used")
 }
 
 func TestPublishImplicitHealthSample_ConnErr(t *testing.T) {

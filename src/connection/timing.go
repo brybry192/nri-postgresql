@@ -2,6 +2,7 @@ package connection
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"time"
@@ -9,14 +10,18 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ConnectionTiming holds DNS and TCP timing for a new database connection.
-// Both values are captured inside the pgx DialFunc, which fires on the first real
-// query issued against the connection — no extra Ping is used. When
-// ENABLE_AVAILABILITY_CHECK is true the DialFunc fires during that query, giving
-// the timing breakdown for the same connection that the availability check validates.
+// ConnectionTiming holds DNS, TCP, and TLS timing for a new database connection.
+// Values are captured inside the pgx DialFunc (DNS + TCP) and via a TLS
+// VerifyConnection callback (TLS handshake). Both fire on the first real query
+// issued against the connection — no extra Ping is used.
 type ConnectionTiming struct {
-	DNSLookupMs  float64
-	TCPConnectMs float64
+	DNSLookupMs    float64
+	TCPConnectMs   float64
+	TLSHandshakeMs float64
+
+	// dialCompleteAt records when the TCP dial finished. Used by the TLS
+	// VerifyConnection callback to compute handshake duration. Not exported.
+	dialCompleteAt time.Time
 }
 
 // timingDialFunc returns a pgx DialFunc that measures DNS resolution and TCP connection time,
@@ -47,13 +52,37 @@ func timingDialFunc(timing *ConnectionTiming) func(ctx context.Context, network,
 		tcpStart := time.Now()
 		conn, err := dialer.DialContext(ctx, network, tcpAddr)
 		timing.TCPConnectMs = msec(time.Since(tcpStart))
+		timing.dialCompleteAt = time.Now()
 		return conn, err
 	}
 }
 
 // attachTimingDialFunc sets the DialFunc on a pgx ConnConfig to capture DNS and TCP timing.
+// If TLS is configured, it also chains a VerifyConnection callback to measure the TLS
+// handshake duration (time from TCP completion to TLS handshake finish, including the
+// PostgreSQL SSLRequest negotiation).
 func attachTimingDialFunc(config *pgx.ConnConfig, timing *ConnectionTiming) {
 	config.Config.DialFunc = timingDialFunc(timing)
+
+	if config.Config.TLSConfig != nil {
+		attachTLSTimingCallback(config.Config.TLSConfig, timing)
+	}
+}
+
+// attachTLSTimingCallback chains a VerifyConnection callback onto the TLS config that
+// records the time between TCP dial completion and TLS handshake finish. Any existing
+// VerifyConnection callback is preserved and called after timing is recorded.
+func attachTLSTimingCallback(tlsConfig *tls.Config, timing *ConnectionTiming) {
+	origVerify := tlsConfig.VerifyConnection
+	tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+		if !timing.dialCompleteAt.IsZero() {
+			timing.TLSHandshakeMs = msec(time.Since(timing.dialCompleteAt))
+		}
+		if origVerify != nil {
+			return origVerify(cs)
+		}
+		return nil
+	}
 }
 
 func msec(d time.Duration) float64 {

@@ -2,6 +2,7 @@ package connection
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"testing"
 	"time"
@@ -60,4 +61,69 @@ func TestTimingDialFunc_TCPConnectFailure(t *testing.T) {
 	// DNS resolves fine for 127.0.0.1; TCPConnectMs should be recorded despite failure.
 	assert.GreaterOrEqual(t, timing.DNSLookupMs, 0.0)
 	assert.GreaterOrEqual(t, timing.TCPConnectMs, 0.0)
+}
+
+// TestTimingDialFunc_DialCompleteAt verifies that dialCompleteAt is set after a
+// successful TCP dial, enabling the TLS timing callback to compute handshake duration.
+func TestTimingDialFunc_DialCompleteAt(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	timing := &ConnectionTiming{}
+	dialFn := timingDialFunc(timing)
+	conn, err := dialFn(context.Background(), "tcp", ln.Addr().String())
+	require.NoError(t, err)
+	conn.Close()
+
+	assert.False(t, timing.dialCompleteAt.IsZero(), "dialCompleteAt should be set after successful dial")
+}
+
+// TestAttachTLSTimingCallback verifies that the VerifyConnection callback records
+// TLS handshake duration and chains any existing callback.
+func TestAttachTLSTimingCallback(t *testing.T) {
+	timing := &ConnectionTiming{}
+	timing.dialCompleteAt = time.Now().Add(-50 * time.Millisecond)
+
+	existingCalled := false
+	tlsConfig := &tls.Config{
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			existingCalled = true
+			return nil
+		},
+	}
+
+	attachTLSTimingCallback(tlsConfig, timing)
+
+	// Simulate the callback firing at the end of a TLS handshake.
+	err := tlsConfig.VerifyConnection(tls.ConnectionState{})
+	assert.NoError(t, err)
+	assert.True(t, existingCalled, "original VerifyConnection callback should be chained")
+	assert.Greater(t, timing.TLSHandshakeMs, 0.0, "TLS handshake time should be recorded")
+}
+
+// TestAttachTLSTimingCallback_NoExisting verifies the callback works when there
+// is no pre-existing VerifyConnection on the TLS config.
+func TestAttachTLSTimingCallback_NoExisting(t *testing.T) {
+	timing := &ConnectionTiming{}
+	timing.dialCompleteAt = time.Now().Add(-25 * time.Millisecond)
+
+	tlsConfig := &tls.Config{}
+	attachTLSTimingCallback(tlsConfig, timing)
+
+	err := tlsConfig.VerifyConnection(tls.ConnectionState{})
+	assert.NoError(t, err)
+	assert.Greater(t, timing.TLSHandshakeMs, 0.0)
+}
+
+// TestAttachTLSTimingCallback_ZeroDialComplete verifies that TLS timing is not
+// recorded if dialCompleteAt was never set (e.g. dial failed before TCP connected).
+func TestAttachTLSTimingCallback_ZeroDialComplete(t *testing.T) {
+	timing := &ConnectionTiming{}
+	tlsConfig := &tls.Config{}
+	attachTLSTimingCallback(tlsConfig, timing)
+
+	err := tlsConfig.VerifyConnection(tls.ConnectionState{})
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0, timing.TLSHandshakeMs, "should not record TLS time when dial never completed")
 }
