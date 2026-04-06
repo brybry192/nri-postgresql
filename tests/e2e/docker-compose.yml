@@ -90,6 +90,7 @@ services:
     volumes:
       - ./config/newrelic-infra.yml:/etc/newrelic-infra.yml:ro
       - ./config/integrations.d/postgresql-local.yml:/etc/newrelic-infra/integrations.d/postgresql-local.yml:ro
+      - ./config/custom-queries.yml:/etc/newrelic-infra/custom-queries.yml:ro
     cap_add:
       - SYS_PTRACE
     privileged: true

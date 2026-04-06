@@ -90,6 +90,23 @@ run_worker() {
 
 END_TIME=$(( $(date +%s) + DURATION ))
 
+# Open idle connections — 20% of max_connections, held for the test duration.
+# These show up in the Workload & Throughput "Connections" chart as the gap
+# between active query connections and total connections.
+MAX_CONN=$(docker compose exec -T "$SERVICE" psql -U "$PG_USER" -d "$DB" -t -A -c \
+    "SELECT setting FROM pg_settings WHERE name = 'max_connections';" 2>/dev/null | tr -d '[:space:]')
+MAX_CONN=${MAX_CONN:-100}
+IDLE_COUNT=$(( MAX_CONN / 5 ))
+
+echo "Opening $IDLE_COUNT idle connections (20% of max_connections=$MAX_CONN)..."
+IDLE_PIDS=""
+for i in $(seq 1 "$IDLE_COUNT"); do
+    docker compose exec -T "$SERVICE" psql -U "$PG_USER" -d "$DB" -c "SELECT pg_sleep($DURATION);" >/dev/null 2>&1 &
+    IDLE_PIDS="$IDLE_PIDS $!"
+done
+echo "  $IDLE_COUNT idle connections opened."
+echo ""
+
 echo "Starting $WORKERS workers..."
 echo ""
 
@@ -99,7 +116,7 @@ for i in $(seq 1 "$WORKERS"); do
     PIDS="$PIDS $!"
 done
 
-# Wait for all workers, print progress every 10s
+# Wait for workers, print progress every 5s
 while kill -0 $PIDS 2>/dev/null; do
     REMAINING=$(( END_TIME - $(date +%s) ))
     if [ "$REMAINING" -gt 0 ]; then
@@ -109,7 +126,12 @@ while kill -0 $PIDS 2>/dev/null; do
 done
 printf "\r                        \n"
 
-wait
+wait $PIDS 2>/dev/null
+
+# Clean up idle connections
+echo "Closing idle connections..."
+kill $IDLE_PIDS 2>/dev/null
+wait $IDLE_PIDS 2>/dev/null
 
 echo ""
 echo "Load generation complete (${DURATION}s)."

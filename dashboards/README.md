@@ -74,20 +74,40 @@ Per-table and per-index statistics from `PostgresqlTableSample` and `PostgresqlI
 
 Table bloat metrics require `COLLECT_BLOAT_METRICS: "true"` (enabled by default).
 
+### 5. Replication
+
+Streaming replication health using custom queries against `pg_stat_replication` and `pg_stat_wal_receiver`, published as `PgCustomQuerySample` events.
+
+| Widget | Description |
+|---|---|
+| Server Role | Billboard showing 0 (primary) or 1 (replica) per instance — detects failovers |
+| WAL Receiver Status | Confirms streaming is active on replicas |
+| Replication Lag (bytes) | How far behind each replica is in WAL bytes |
+| Replication Lag Over Time | Same in MB for readability at scale |
+| Server Role Over Time | Tracks recovery mode — a flip indicates a failover event |
+| Replication Details | Per-replica table: lag, state, sync mode, address |
+| WAL Receiver Details | Replica perspective: sender host, status, pending bytes |
+
+Requires `CUSTOM_METRICS_CONFIG` pointing to the included `custom-queries.yml`. The queries use `pg_is_in_recovery()`, `pg_stat_replication` (primary-side), and `pg_stat_wal_receiver` (replica-side) to capture role identity and replication health without modifying the integration's Go code.
+
 ## Required Integration Flags
 
-The Availability page requires these flags. The other pages use metrics collected by default.
+The Availability page requires the observability flags. The Replication page requires the custom queries config. The other pages use metrics collected by default.
 
 ```yaml
 env:
+  # Availability page
   COLLECT_CONNECTION_TIMING: "true"          # Implicit availability + DNS/TCP/TLS timing
   ENABLE_AVAILABILITY_CHECK: "true"          # Explicit canary query
   AVAILABILITY_CHECK_QUERY: "SELECT 1"       # Canary query (optional, defaults to SELECT 1)
   AVAILABILITY_CHECK_TIMEOUT_MS: "5000"      # Canary query timeout (optional)
   COLLECT_QUERY_TELEMETRY: "true"            # Per-query telemetry (optional)
+
+  # Replication page
+  CUSTOM_METRICS_CONFIG: "/path/to/custom-queries.yml"  # Replication + server role queries
 ```
 
-At minimum, `COLLECT_CONNECTION_TIMING` must be enabled for the Availability page. The Instance Performance, Database Health, and Tables & Indexes pages work without any additional flags.
+At minimum, `COLLECT_CONNECTION_TIMING` must be enabled for the Availability page. `CUSTOM_METRICS_CONFIG` is needed for the Replication page. The Server Internals, Workload & Throughput, and Tables & Indexes pages work without any additional flags.
 
 ## How to Import
 
@@ -156,6 +176,8 @@ Variable dropdowns respect the dashboard time picker — they only show values f
 | `postgresql-monitoring-dashboard.json` | Dashboard template with `YOUR_ACCOUNT_ID` placeholder |
 | `sync-dashboard.sh` | Script to create or update the dashboard via NerdGraph API |
 | `README.md` | This file |
+
+The custom queries config for the Replication page is at `tests/e2e/config/custom-queries.yml`. Copy it to your agent's config directory and reference it via `CUSTOM_METRICS_CONFIG`.
 
 ## Note
 

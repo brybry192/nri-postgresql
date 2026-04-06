@@ -13,7 +13,7 @@
           "layout": {
             "column": 1,
             "row": 1,
-            "width": 3,
+            "width": 2,
             "height": 1
           },
           "linkedEntityGuids": null,
@@ -543,11 +543,61 @@
               "ignoreTimeRange": false
             }
           }
+        },
+        {
+          "title": "Fleet Uptime %",
+          "description": "Aggregate uptime across all instances \u2014 not faceted.",
+          "layout": {
+            "column": 3,
+            "row": 1,
+            "width": 1,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}})"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            }
+          }
         }
       ]
     },
     {
-      "name": "Instance Performance",
+      "name": "Server Internals",
       "description": null,
       "widgets": [
         {
@@ -564,7 +614,7 @@
             "id": "viz.markdown"
           },
           "rawConfiguration": {
-            "text": "## Instance Performance\n---\n\nMetrics from PostgreSQL's background writer and I/O subsystem.\n\n#### Key Indicators\n\n| Metric | What to watch |\n|---|---|\n| **Checkpoints** | Frequent *requested* checkpoints indicate WAL pressure \u2014 consider increasing `checkpoint_completion_target` or `max_wal_size` |\n| **Backend writes** | High backend buffer writes mean the bgwriter isn't keeping up \u2014 tune `bgwriter_lru_maxpages` |\n| **Buffer allocation** | Sustained high allocation rates may indicate insufficient `shared_buffers` |\n| **Checkpoint timing** | Long sync times suggest I/O bottleneck on the storage layer |\n\n---\n\n#### Resources\n- [pg_stat_bgwriter](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-BGWRITER-VIEW)\n- [WAL Configuration](https://www.postgresql.org/docs/current/wal-configuration.html)\n- [Background Writer](https://www.postgresql.org/docs/current/runtime-config-resource.html#RUNTIME-CONFIG-RESOURCE-BACKGROUND-WRITER)\n"
+            "text": "## Server Internals\n---\n\nMetrics from PostgreSQL's background writer and I/O subsystem.\n\n#### Key Indicators\n\n| Metric | What to watch |\n|---|---|\n| **Checkpoints** | Frequent *requested* checkpoints indicate WAL pressure \u2014 consider increasing `checkpoint_completion_target` or `max_wal_size` |\n| **Backend writes** | High backend buffer writes mean the bgwriter isn't keeping up \u2014 tune `bgwriter_lru_maxpages` |\n| **Buffer allocation** | Sustained high allocation rates may indicate insufficient `shared_buffers` |\n| **Checkpoint timing** | Long sync times suggest I/O bottleneck on the storage layer |\n\n---\n\n#### Resources\n- [pg_stat_bgwriter](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-BGWRITER-VIEW)\n- [WAL Configuration](https://www.postgresql.org/docs/current/wal-configuration.html)\n- [Background Writer](https://www.postgresql.org/docs/current/runtime-config-resource.html#RUNTIME-CONFIG-RESOURCE-BACKGROUND-WRITER)\n"
           }
         },
         {
@@ -787,7 +837,7 @@
       ]
     },
     {
-      "name": "Database Health",
+      "name": "Workload & Throughput",
       "description": null,
       "widgets": [
         {
@@ -804,7 +854,7 @@
             "id": "viz.markdown"
           },
           "rawConfiguration": {
-            "text": "## Database Health\n---\n\nPer-database activity from [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW).\n\n#### Key Ratios\n\n| Metric | Healthy | Investigate |\n|---|---|---|\n| **Cache hit ratio** | > 99% | < 95% \u2014 shared_buffers may be too small |\n| **Commit ratio** | > 99% | < 95% \u2014 high rollback rate suggests app errors |\n| **Rows fetched / returned** | Close to 1:1 | Large gap means many rows scanned but few used \u2014 missing indexes |\n\n#### Deadlocks & Temp Files\n\n- **Deadlocks** should be 0 in steady state. Persistent deadlocks indicate lock ordering issues.\n- **Temp files** are created when `work_mem` is too small for sorts/joins. Frequent creation means tuning is needed.\n\n---\n\n#### Resources\n- [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW)\n- [Tuning shared_buffers](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-SHARED-BUFFERS)\n- [Tuning work_mem](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-WORK-MEM)\n"
+            "text": "## Workload & Throughput\n---\n\nPer-database activity from [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW).\n\n#### Key Ratios\n\n| Metric | Healthy | Investigate |\n|---|---|---|\n| **Cache hit ratio** | > 99% | < 95% \u2014 shared_buffers may be too small |\n| **Commit ratio** | > 99% | < 95% \u2014 high rollback rate suggests app errors |\n| **Rows fetched / returned** | Close to 1:1 | Large gap means many rows scanned but few used \u2014 missing indexes |\n\n#### Deadlocks & Temp Files\n\n- **Deadlocks** should be 0 in steady state. Persistent deadlocks indicate lock ordering issues.\n- **Temp files** are created when `work_mem` is too small for sorts/joins. Frequent creation means tuning is needed.\n\n---\n\n#### Resources\n- [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW)\n- [Tuning shared_buffers](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-SHARED-BUFFERS)\n- [Tuning work_mem](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-WORK-MEM)\n"
           }
         },
         {
@@ -829,7 +879,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT latest(db.connections) AS 'active', latest(db.maxconnections) AS 'max' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT latest(db.connections) AS 'active', latest(db.maxconnections) AS 'max' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -865,7 +915,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT 100 * sum(db.bufferHitsPerSecond) / (sum(db.bufferHitsPerSecond) + sum(db.readsPerSecond) + 0.001) AS 'hit ratio' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT 100 * sum(db.bufferHitsPerSecond) / (sum(db.bufferHitsPerSecond) + sum(db.readsPerSecond) + 0.001) AS 'hit ratio' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -901,7 +951,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.commitsPerSecond) AS 'commits', average(db.rollbacksPerSecond) AS 'rollbacks' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.commitsPerSecond) AS 'commits', average(db.rollbacksPerSecond) AS 'rollbacks' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -937,7 +987,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.rowsInsertedPerSecond) AS 'inserts', average(db.rowsUpdatedPerSecond) AS 'updates', average(db.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.rowsInsertedPerSecond) AS 'inserts', average(db.rowsUpdatedPerSecond) AS 'updates', average(db.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -973,7 +1023,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.rowsReturnedPerSecond) AS 'returned', average(db.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.rowsReturnedPerSecond) AS 'returned', average(db.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1009,7 +1059,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.deadlocksPerSecond) AS 'deadlocks/s' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database"
+                "query": "SELECT average(db.deadlocksPerSecond) AS 'deadlocks/s' FROM PostgresqlDatabaseSample FACET displayName"
               }
             ],
             "platformOptions": {
@@ -1059,7 +1109,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.tempFilesCreatedPerSecond) AS 'temp files/s' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database"
+                "query": "SELECT average(db.tempFilesCreatedPerSecond) AS 'temp files/s' FROM PostgresqlDatabaseSample FACET displayName"
               }
             ],
             "platformOptions": {
@@ -1109,7 +1159,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.tempWrittenInBytesPerSecond) AS 'bytes/s' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.tempWrittenInBytesPerSecond) AS 'bytes/s' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1145,7 +1195,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.readTimeInMillisecondsPerSecond) AS 'read', average(db.writeTimeInMillisecondsPerSecond) AS 'write' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.readTimeInMillisecondsPerSecond) AS 'read', average(db.writeTimeInMillisecondsPerSecond) AS 'write' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1181,7 +1231,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT average(db.conflicts.locksPerSecond) AS 'locks', average(db.conflicts.snapshotPerSecond) AS 'snapshot', average(db.conflicts.deadlockPerSecond) AS 'deadlock' FROM PostgresqlDatabaseSample WHERE displayName IN ({{instance}}) FACET database TIMESERIES AUTO"
+                "query": "SELECT average(db.conflicts.locksPerSecond) AS 'locks', average(db.conflicts.snapshotPerSecond) AS 'snapshot', average(db.conflicts.deadlockPerSecond) AS 'deadlock' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1240,7 +1290,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT latest(table.totalSizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlTableSample WHERE displayName IN ({{instance}}) FACET database, schema, `table` LIMIT 15"
+                "query": "SELECT latest(table.totalSizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlTableSample FACET database, schema, displayName LIMIT 15"
               }
             ],
             "platformOptions": {
@@ -1270,7 +1320,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT sum(table.sequentialScansPerSecond) AS 'seq scans', sum(table.indexScansPerSecond) AS 'idx scans' FROM PostgresqlTableSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+                "query": "SELECT sum(table.sequentialScansPerSecond) AS 'seq scans', sum(table.indexScansPerSecond) AS 'idx scans' FROM PostgresqlTableSample TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1306,7 +1356,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT latest(table.deadRows) AS 'dead rows' FROM PostgresqlTableSample WHERE displayName IN ({{instance}}) FACET database, schema, `table` LIMIT 15"
+                "query": "SELECT latest(table.deadRows) AS 'dead rows' FROM PostgresqlTableSample FACET database, schema, displayName LIMIT 15"
               }
             ],
             "platformOptions": {
@@ -1336,7 +1386,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT latest(table.bloatRatio) AS 'bloat %' FROM PostgresqlTableSample WHERE displayName IN ({{instance}}) AND table.bloatRatio IS NOT NULL FACET database, schema, `table` LIMIT 15"
+                "query": "SELECT latest(table.bloatRatio) AS 'bloat %' FROM PostgresqlTableSample WHERE table.bloatRatio IS NOT NULL FACET database, schema, displayName LIMIT 15"
               }
             ],
             "platformOptions": {
@@ -1366,7 +1416,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT sum(table.rowsInsertedPerSecond) AS 'inserts', sum(table.rowsUpdatedPerSecond) AS 'updates', sum(table.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlTableSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+                "query": "SELECT sum(table.rowsInsertedPerSecond) AS 'inserts', sum(table.rowsUpdatedPerSecond) AS 'updates', sum(table.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlTableSample TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1402,7 +1452,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT latest(index.sizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlIndexSample WHERE displayName IN ({{instance}}) FACET database, schema, `table`, index_name LIMIT 15"
+                "query": "SELECT latest(index.sizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlIndexSample FACET database, schema, displayName, index_name LIMIT 15"
               }
             ],
             "platformOptions": {
@@ -1432,7 +1482,7 @@
                 "accountIds": [
                   "YOUR_ACCOUNT_ID"
                 ],
-                "query": "SELECT sum(index.rowsReadPerSecond) AS 'read', sum(index.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlIndexSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+                "query": "SELECT sum(index.rowsReadPerSecond) AS 'read', sum(index.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlIndexSample TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -1443,6 +1493,286 @@
             },
             "yAxisLeft": {
               "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replication",
+      "description": null,
+      "widgets": [
+        {
+          "title": null,
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 10
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Replication\n---\n\nMetrics from custom queries against `pg_stat_replication` (primary) and `pg_stat_wal_receiver` (replica).\n\n#### How it works\n\nThe integration runs three custom SQL queries each cycle:\n\n1. **`pg_is_in_recovery()`** \u2014 returns `0` on primaries, `1` on replicas. Tracks server role so dashboards can detect failovers.\n2. **`pg_stat_replication`** \u2014 queried on the primary. Returns one row per connected replica with replication lag in bytes.\n3. **`pg_stat_wal_receiver`** \u2014 queried on the replica. Confirms streaming is active and shows pending WAL bytes.\n\nThese use the `CUSTOM_METRICS_CONFIG` flag pointing to `custom-queries.yml`. Results appear as `PgCustomQuerySample` events.\n\n---\n\n#### Key Indicators\n\n| Metric | Healthy | Investigate |\n|---|---|---|\n| **Replication lag** | < 1 MB | > 10 MB sustained \u2014 replica can't keep up |\n| **WAL receiver** | `streaming` | `catchup` or missing \u2014 check network/replica load |\n| **Recovery mode** | Stable 0 or 1 | Value flips \u2014 failover occurred |\n\n---\n\n#### Resources\n- [pg_stat_replication](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-REPLICATION-VIEW)\n- [pg_stat_wal_receiver](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-WAL-RECEIVER-VIEW)\n- [Streaming Replication](https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION)\n- [pg_is_in_recovery()](https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-RECOVERY-INFO-TABLE)\n"
+          }
+        },
+        {
+          "title": "Server Role",
+          "description": "0 = primary, 1 = replica. A change indicates failover.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'in recovery' FROM PgCustomQuerySample WHERE metric_name = 'pg.isInRecovery' FACET displayName, server_role"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 0
+                },
+                {
+                  "from": 1,
+                  "severity": "warning",
+                  "to": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "WAL Receiver Status",
+          "description": "1 = streaming (healthy). 0 or missing = replication broken.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'active' FROM PgCustomQuerySample WHERE metric_name = 'pg.walReceiver.active' FACET displayName, receiver_status"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 1,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Replication Lag (bytes)",
+          "description": "Bytes of WAL the replica is behind. Should be low and stable.",
+          "layout": {
+            "column": 1,
+            "row": 2,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT max(metric_value) AS 'lag bytes' FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Replication Lag Over Time",
+          "description": "Same as lag bytes but in MB for readability at scale.",
+          "layout": {
+            "column": 5,
+            "row": 2,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT max(metric_value) / 1e6 AS 'lag MB' FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Server Role Over Time",
+          "description": "Tracks recovery mode over time. A flip from 0\u21921 or 1\u21920 indicates a failover event.",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'in recovery' FROM PgCustomQuerySample WHERE metric_name = 'pg.isInRecovery' FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Replication Details",
+          "description": "Per-replica replication details from the primary.",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'lag bytes', latest(replication_state), latest(sync_mode), latest(replica_addr) FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "WAL Receiver Details",
+          "description": "WAL receiver status from the replica's perspective.",
+          "layout": {
+            "column": 5,
+            "row": 8,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'active', latest(receiver_status), latest(sender_host), latest(pending_bytes) AS 'pending bytes' FROM PgCustomQuerySample WHERE metric_name = 'pg.walReceiver.active' FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
             }
           }
         }
@@ -1462,7 +1792,7 @@
       ],
       "nrqlQuery": {
         "accountIds": [
-                  "YOUR_ACCOUNT_ID"
+          "YOUR_ACCOUNT_ID"
         ],
         "query": "SELECT uniques(displayName) FROM PostgresqlInstanceSample"
       },
@@ -1488,7 +1818,7 @@
       ],
       "nrqlQuery": {
         "accountIds": [
-                  "YOUR_ACCOUNT_ID"
+          "YOUR_ACCOUNT_ID"
         ],
         "query": "SELECT uniques(label.service_name) FROM PostgresqlHealthSample"
       },
@@ -1515,7 +1845,7 @@
       ],
       "nrqlQuery": {
         "accountIds": [
-                  "YOUR_ACCOUNT_ID"
+          "YOUR_ACCOUNT_ID"
         ],
         "query": "SELECT uniques(label.role) FROM PostgresqlHealthSample"
       },
@@ -1542,7 +1872,7 @@
       ],
       "nrqlQuery": {
         "accountIds": [
-                  "YOUR_ACCOUNT_ID"
+          "YOUR_ACCOUNT_ID"
         ],
         "query": "SELECT uniques(checkType) FROM PostgresqlHealthSample"
       },
@@ -1569,7 +1899,7 @@
       ],
       "nrqlQuery": {
         "accountIds": [
-                  "YOUR_ACCOUNT_ID"
+          "YOUR_ACCOUNT_ID"
         ],
         "query": "SELECT uniques(label.environment) FROM PostgresqlHealthSample"
       },
