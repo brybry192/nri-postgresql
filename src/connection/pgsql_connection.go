@@ -106,7 +106,9 @@ func (ci *connectionInfo) NewConnection(database string) (*PGSQLConnection, erro
 	// Using RegisterConnConfig/UnregisterConnConfig would race: the deferred unregister fires
 	// when NewConnection returns, but sqlx.DB is lazy and the driver looks up the config on
 	// the first actual query, by which point the entry has already been removed.
-	pgConn.connection = sqlx.NewDb(stdlib.OpenDB(*config), "pgx")
+	db := stdlib.OpenDB(*config)
+	db.SetMaxOpenConns(1)
+	pgConn.connection = sqlx.NewDb(db, "pgx")
 
 	return pgConn, nil
 }

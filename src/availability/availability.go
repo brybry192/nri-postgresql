@@ -6,6 +6,7 @@ package availability
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/newrelic/nri-postgresql/src/connection"
@@ -29,6 +30,19 @@ type CheckResult struct {
 // A non-error result with at least one row is considered available.
 func ExplicitCheck(ctx context.Context, conn *connection.PGSQLConnection, query string) *CheckResult {
 	result := &CheckResult{Query: query}
+
+	// Set a server-side statement_timeout so PostgreSQL kills the query even if the
+	// client context is cancelled but the cancel message is lost (proxy, network partition).
+	// This prevents a bad canary query from holding a PG backend indefinitely.
+	if deadline, ok := ctx.Deadline(); ok {
+		timeoutMs := int(time.Until(deadline).Milliseconds())
+		if timeoutMs < 1 {
+			timeoutMs = 1
+		}
+		if setRows, err := conn.QueryxContext(ctx, fmt.Sprintf("SET statement_timeout = %d", timeoutMs)); err == nil {
+			setRows.Close()
+		}
+	}
 
 	start := time.Now()
 	rows, err := conn.QueryxContext(ctx, query)
