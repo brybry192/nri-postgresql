@@ -529,14 +529,15 @@ func PopulateTableMetrics(databases collection.DatabaseList, version *semver.Ver
 			return
 		}
 
-		// Create a new connection to the database
-		con, err := ci.NewConnection(database)
-		if err != nil {
-			log.Error("Failed to connect to database %s: %s", database, err.Error())
-			continue
-		}
-		defer con.Close()
-		populateTableMetricsForDatabase(schemaList, version, con, pgIntegration, ci, collectBloat)
+		func() {
+			con, err := ci.NewConnection(database)
+			if err != nil {
+				log.Error("Failed to connect to database %s: %s", database, err.Error())
+				return
+			}
+			defer con.Close()
+			populateTableMetricsForDatabase(schemaList, version, con, pgIntegration, ci, collectBloat)
+		}()
 	}
 }
 
@@ -596,13 +597,15 @@ func populateTableMetricsForDatabase(schemaList collection.SchemaList, version *
 // PopulateIndexMetrics populates the metrics for an index
 func PopulateIndexMetrics(databases collection.DatabaseList, pgIntegration *integration.Integration, ci connection.Info) {
 	for database, schemaList := range databases {
-		con, err := ci.NewConnection(database)
-		if err != nil {
-			log.Error("Failed to create new connection to database %s: %s", database, err.Error())
-			continue
-		}
-		defer con.Close()
-		populateIndexMetricsForDatabase(schemaList, con, pgIntegration, ci)
+		func() {
+			con, err := ci.NewConnection(database)
+			if err != nil {
+				log.Error("Failed to create new connection to database %s: %s", database, err.Error())
+				return
+			}
+			defer con.Close()
+			populateIndexMetricsForDatabase(schemaList, con, pgIntegration, ci)
+		}()
 	}
 }
 
