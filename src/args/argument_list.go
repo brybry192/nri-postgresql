@@ -39,6 +39,7 @@ type ArgumentList struct {
 	AvailabilityCheckQuery               string `default:"SELECT 1" help:"SQL query used for the explicit availability check. Defaults to 'SELECT 1'."`
 	AvailabilityCheckTimeoutMs           int    `default:"10000" help:"Timeout in milliseconds for the explicit availability check query. Defaults to 10000ms. Set below the collection interval to ensure a timed-out check does not block the next cycle."`
 	CollectQueryTelemetry                bool   `default:"false" help:"If true, emits a PostgresqlHealthSample event (checkType=query) for every internal monitoring query with duration, error status, and error classification."`
+	ShunStateFilePath                    string `default:"" help:"Path to the JSON file where shun/backoff state is persisted across collection cycles. When empty, shunning is disabled. Recommended: /var/db/newrelic-infra/nri-postgresql-shun.json"`
 }
 
 // Validate validates PostgreSQl arguments

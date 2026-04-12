@@ -17,6 +17,7 @@ import (
 	"github.com/newrelic/nri-postgresql/src/availability"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
+	"github.com/newrelic/nri-postgresql/src/connection/shun"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -43,12 +44,33 @@ func PopulateMetrics(
 	i *integration.Integration,
 	collectPgBouncer, collectDbLocks, collectBloat bool,
 	customMetricsQuery string,
-	obs ObservabilityConfig) {
+	obs ObservabilityConfig,
+	shunMgr *shun.Manager) {
+
+	instanceKey := instance.Metadata.Name // host:port
+
+	// When shunned, skip the real connection attempt entirely. Emit cached health
+	// samples so NRQL alerts continue to see available=0 during the backoff.
+	if shunMgr != nil && shunMgr.IsShunned(instanceKey) {
+		state := shunMgr.GetState(instanceKey)
+		remaining := shunMgr.ShunRemainingCycles(instanceKey)
+		log.Warn("Instance %s is shunned (%s, %d cycles remaining) — skipping connection",
+			instanceKey, state.LastErrorCode, remaining)
+
+		if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+			publishShunnedHealthSample(instance, state, remaining)
+		}
+		return
+	}
 
 	con, err := ci.NewConnection(ci.DatabaseName())
 
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
+		errCode, errMsg := connection.ClassifyError(err)
+		if shunMgr != nil {
+			shunMgr.RecordFailure(instanceKey, errCode, errMsg)
+		}
 		// Emit health samples on connection failure only when observability is enabled,
 		// so there is no gap in the time series for alerting.
 		if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
@@ -59,7 +81,6 @@ func PopulateMetrics(
 			if q == "" {
 				q = availability.DefaultQuery
 			}
-			errCode, errMsg := connection.ClassifyError(err)
 			publishExplicitHealthSample(instance, &availability.CheckResult{
 				Available:    false,
 				Query:        q,
@@ -93,10 +114,26 @@ func PopulateMetrics(
 		cancel()
 		if !explicitResult.Available {
 			connErr = &connection.ClassifiedError{Code: explicitResult.ErrorCode, Msg: explicitResult.ErrorMessage}
+			if shunMgr != nil {
+				shunMgr.RecordFailure(instanceKey, explicitResult.ErrorCode, explicitResult.ErrorMessage)
+			}
+		} else if shunMgr != nil {
+			shunMgr.RecordSuccess(instanceKey)
 		}
 	} else if obs.CollectConnectionTiming {
 		// No availability check — ping to trigger the DialFunc before reading con.Timing.
 		connErr = con.Ping()
+		if shunMgr != nil {
+			if connErr != nil {
+				errCode, errMsg := connection.ClassifyError(connErr)
+				shunMgr.RecordFailure(instanceKey, errCode, errMsg)
+			} else {
+				shunMgr.RecordSuccess(instanceKey)
+			}
+		}
+	} else if shunMgr != nil {
+		// No observability flags, but shun manager active — connection succeeded.
+		shunMgr.RecordSuccess(instanceKey)
 	}
 
 	// Emit health samples only when at least one observability flag is active.
@@ -201,6 +238,33 @@ func publishExplicitHealthSample(instance *integration.Entity, result *availabil
 		setAttribute(ms, "errorCode", result.ErrorCode)
 		setAttribute(ms, "errorMessage", result.ErrorMessage)
 	}
+}
+
+// publishShunnedHealthSample emits health samples for a shunned instance. No real
+// connection is attempted — cached error info from the last failure is used. This
+// ensures NRQL alert conditions continue to see the outage during backoff.
+func publishShunnedHealthSample(instance *integration.Entity, state *shun.InstanceState, remainingCycles int) {
+	// Implicit sample (checkType=implicit) with shunned=true
+	implicitAttrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "implicit"})
+	ims := instance.NewMetricSet(healthSampleEventType, implicitAttrs...)
+	setGauge(ims, "available", 0)
+	setGauge(ims, "hasError", 1)
+	setAttribute(ims, "errorCode", state.LastErrorCode)
+	setAttribute(ims, "errorMessage", state.LastErrorMessage)
+	setAttribute(ims, "shunned", "true")
+	setGauge(ims, "shunRemainingCycles", float64(remainingCycles))
+	setGauge(ims, "shunBackoffCycles", float64(state.BackoffCycles))
+
+	// Explicit sample (checkType=explicit) mirroring the same failure
+	explicitAttrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "explicit"})
+	ems := instance.NewMetricSet(healthSampleEventType, explicitAttrs...)
+	setGauge(ems, "available", 0)
+	setGauge(ems, "hasError", 1)
+	setAttribute(ems, "errorCode", state.LastErrorCode)
+	setAttribute(ems, "errorMessage", state.LastErrorMessage)
+	setAttribute(ems, "shunned", "true")
+	setGauge(ems, "shunRemainingCycles", float64(remainingCycles))
+	setGauge(ems, "shunBackoffCycles", float64(state.BackoffCycles))
 }
 
 // publishQueryHealthSamples emits one PostgresqlHealthSample per internal monitoring
