@@ -22,6 +22,8 @@ import (
 
 const (
 	versionQuery = `SHOW server_version`
+
+	healthSampleEventType = "PostgresqlHealthSample"
 )
 
 // ObservabilityConfig holds the optional APM-style observability settings passed to PopulateMetrics.
@@ -47,19 +49,18 @@ func PopulateMetrics(
 
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
-		// Always emit the implicit connection sample so the series has no gap.
-		publishConnectionSample(instance, con, err)
-		// When the connection itself fails and the availability check is enabled, emit an
-		// explicit check sample reflecting the connection error so the checkType=explicit
-		// series never has a gap — callers can alert on available=0 without special-casing
-		// missing data.
+		// Emit health samples on connection failure only when observability is enabled,
+		// so there is no gap in the time series for alerting.
+		if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+			publishImplicitHealthSample(instance, con, err)
+		}
 		if obs.EnableAvailabilityCheck {
 			q := obs.AvailabilityCheckQuery
 			if q == "" {
 				q = availability.DefaultQuery
 			}
 			errCode, errMsg := connection.ClassifyError(err)
-			publishAvailabilityCheckSample(instance, &availability.CheckResult{
+			publishExplicitHealthSample(instance, &availability.CheckResult{
 				Available:    false,
 				Query:        q,
 				ErrorCode:    errCode,
@@ -70,12 +71,12 @@ func PopulateMetrics(
 	}
 	defer con.Close()
 
-	// Before publishing the implicit connection sample, ensure the pgx DialFunc has fired
+	// Before publishing the implicit health sample, ensure the pgx DialFunc has fired
 	// so that con.Timing carries real DNS/TCP values instead of zeros.
 	//
 	// When ENABLE_AVAILABILITY_CHECK is true the ExplicitCheck below triggers the dial.
 	// When only COLLECT_CONNECTION_TIMING is true we issue a lightweight Ping instead.
-	// Either way the order is: trigger dial → publishConnectionSample → everything else.
+	// Either way the order is: trigger dial → publishImplicitHealthSample → everything else.
 	var explicitResult *availability.CheckResult
 	if obs.EnableAvailabilityCheck {
 		q := obs.AvailabilityCheckQuery
@@ -94,12 +95,14 @@ func PopulateMetrics(
 		_ = con.Ping()
 	}
 
-	// Now con.Timing is populated (if CollectConnectionTiming is enabled), so the
-	// connection sample carries accurate DNS and TCP values.
-	publishConnectionSample(instance, con, err)
+	// Emit health samples only when at least one observability flag is active.
+	// With no flags set, the integration produces identical output to the upstream baseline.
+	if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+		publishImplicitHealthSample(instance, con, nil)
+	}
 
 	if explicitResult != nil {
-		publishAvailabilityCheckSample(instance, explicitResult)
+		publishExplicitHealthSample(instance, explicitResult)
 	}
 
 	version, err := CollectVersion(con)
@@ -121,7 +124,7 @@ func PopulateMetrics(
 
 	// Drain and publish per-query telemetry accumulated during the collection above.
 	if obs.CollectQueryTelemetry {
-		publishQueryTelemetrySamples(instance, con.DrainTelemetry())
+		publishQueryHealthSamples(instance, con.DrainTelemetry())
 	}
 
 	if collectPgBouncer {
@@ -132,99 +135,93 @@ func PopulateMetrics(
 			defer pgbCon.Close()
 			PopulatePgBouncerMetrics(i, pgbCon, ci)
 			if obs.CollectQueryTelemetry {
-				publishQueryTelemetrySamples(instance, pgbCon.DrainTelemetry())
+				publishQueryHealthSamples(instance, pgbCon.DrainTelemetry())
 			}
 		}
 	}
 }
 
-// publishConnectionSample emits a PostgresqlConnectionSample capturing the implicit availability
-// signal (connection success/failure) and, when timing was collected, the connection phase timings.
-func publishConnectionSample(instance *integration.Entity, con *connection.PGSQLConnection, connErr error) {
-	ms := instance.NewMetricSet("PostgresqlConnectionSample",
-		attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
-		attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
-	)
+// healthSampleAttrs returns the standard attributes for a PostgresqlHealthSample.
+func healthSampleAttrs(instance *integration.Entity) []attribute.Attribute {
+	return []attribute.Attribute{
+		{Key: "displayName", Value: instance.Metadata.Name},
+		{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+	}
+}
 
+func setAttribute(ms *metric.Set, name, val string) {
+	if err := ms.SetMetric(name, val, metric.ATTRIBUTE); err != nil {
+		log.Warn("Failed to set attribute %s: %s", name, err)
+	}
+}
+
+// publishImplicitHealthSample emits a PostgresqlHealthSample with checkType=implicit
+// capturing the ping-based availability signal and connection phase timings.
+func publishImplicitHealthSample(instance *integration.Entity, con *connection.PGSQLConnection, connErr error) {
+	attrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "implicit"})
+	ms := instance.NewMetricSet(healthSampleEventType, attrs...)
+
+	hasError := 0.0
 	if connErr != nil {
-		if err := ms.SetMetric("db.available", 0, metric.GAUGE); err != nil {
-			log.Warn("Failed to set db.available metric: %s", err)
-		}
+		hasError = 1.0
+		setGauge(ms, "available", 0)
 		errCode, errMsg := connection.ClassifyError(connErr)
-		if err := ms.SetMetric("db.connection.errorCode", errCode, metric.ATTRIBUTE); err != nil {
-			log.Warn("Failed to set db.connection.errorCode: %s", err)
-		}
-		if err := ms.SetMetric("db.connection.errorMessage", errMsg, metric.ATTRIBUTE); err != nil {
-			log.Warn("Failed to set db.connection.errorMessage: %s", err)
-		}
-		return
+		setAttribute(ms, "errorCode", errCode)
+		setAttribute(ms, "errorMessage", errMsg)
+	} else {
+		setGauge(ms, "available", 1)
 	}
+	setGauge(ms, "hasError", hasError)
 
-	if err := ms.SetMetric("db.available", 1, metric.GAUGE); err != nil {
-		log.Warn("Failed to set db.available metric: %s", err)
-	}
-
-	if con.Timing != nil {
-		t := con.Timing
-		setGauge(ms, "db.connection.dnsLookupMs", t.DNSLookupMs)
-		setGauge(ms, "db.connection.tcpConnectMs", t.TCPConnectMs)
+	if con != nil && con.Timing != nil {
+		setGauge(ms, "dnsLookupMs", con.Timing.DNSLookupMs)
+		setGauge(ms, "tcpConnectMs", con.Timing.TCPConnectMs)
 	}
 }
 
-// publishAvailabilityCheckSample adds the explicit canary query results to the
-// PostgresqlConnectionSample entity as db.availabilityCheck.* fields.
-func publishAvailabilityCheckSample(instance *integration.Entity, result *availability.CheckResult) {
-	ms := instance.NewMetricSet("PostgresqlConnectionSample",
-		attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
-		attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
-		attribute.Attribute{Key: "checkType", Value: "explicit"},
-	)
+// publishExplicitHealthSample emits a PostgresqlHealthSample with checkType=explicit
+// carrying the canary query result.
+func publishExplicitHealthSample(instance *integration.Entity, result *availability.CheckResult) {
+	attrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "explicit"})
+	ms := instance.NewMetricSet(healthSampleEventType, attrs...)
 
-	available := 0
+	available := 0.0
+	hasError := 0.0
 	if result.Available {
-		available = 1
+		available = 1.0
+	} else {
+		hasError = 1.0
 	}
-	setGauge(ms, "db.availabilityCheck.available", float64(available))
-	setGauge(ms, "db.availabilityCheck.durationMs", result.DurationMs)
-	if err := ms.SetMetric("db.availabilityCheck.query", result.Query, metric.ATTRIBUTE); err != nil {
-		log.Warn("Failed to set db.availabilityCheck.query: %s", err)
-	}
+	setGauge(ms, "available", available)
+	setGauge(ms, "hasError", hasError)
+	setGauge(ms, "durationMs", result.DurationMs)
+	setAttribute(ms, "query", result.Query)
 	if result.ErrorCode != "" {
-		if err := ms.SetMetric("db.availabilityCheck.errorCode", result.ErrorCode, metric.ATTRIBUTE); err != nil {
-			log.Warn("Failed to set db.availabilityCheck.errorCode: %s", err)
-		}
-	}
-	if result.ErrorMessage != "" {
-		if err := ms.SetMetric("db.availabilityCheck.errorMessage", result.ErrorMessage, metric.ATTRIBUTE); err != nil {
-			log.Warn("Failed to set db.availabilityCheck.errorMessage: %s", err)
-		}
+		setAttribute(ms, "errorCode", result.ErrorCode)
+		setAttribute(ms, "errorMessage", result.ErrorMessage)
 	}
 }
 
-// publishQueryTelemetrySamples emits one PostgresqlQueryTelemetrySample per telemetry entry.
-func publishQueryTelemetrySamples(instance *integration.Entity, entries []*connection.QueryTelemetry) {
+// publishQueryHealthSamples emits one PostgresqlHealthSample per internal monitoring
+// query with checkType=query.
+func publishQueryHealthSamples(instance *integration.Entity, entries []*connection.QueryTelemetry) {
+	baseAttrs := healthSampleAttrs(instance)
 	for _, t := range entries {
-		ms := instance.NewMetricSet("PostgresqlQueryTelemetrySample",
-			attribute.Attribute{Key: "displayName", Value: instance.Metadata.Name},
-			attribute.Attribute{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+		entryAttrs := append(baseAttrs,
+			attribute.Attribute{Key: "checkType", Value: "query"},
 			attribute.Attribute{Key: "queryName", Value: t.QueryName},
 			attribute.Attribute{Key: "database", Value: t.Database},
 		)
+		ms := instance.NewMetricSet(healthSampleEventType, entryAttrs...)
 		setGauge(ms, "durationMs", t.DurationMs)
-		hasError := 0
+		hasError := 0.0
 		if t.HasError {
-			hasError = 1
+			hasError = 1.0
 		}
-		setGauge(ms, "hasError", float64(hasError))
+		setGauge(ms, "hasError", hasError)
 		if t.ErrorCode != "" {
-			if err := ms.SetMetric("errorCode", t.ErrorCode, metric.ATTRIBUTE); err != nil {
-				log.Warn("Failed to set errorCode: %s", err)
-			}
-		}
-		if t.ErrorMessage != "" {
-			if err := ms.SetMetric("errorMessage", t.ErrorMessage, metric.ATTRIBUTE); err != nil {
-				log.Warn("Failed to set errorMessage: %s", err)
-			}
+			setAttribute(ms, "errorCode", t.ErrorCode)
+			setAttribute(ms, "errorMessage", t.ErrorMessage)
 		}
 	}
 }
