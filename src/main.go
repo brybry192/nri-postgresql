@@ -6,7 +6,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"time"
 
 	queryperformancemonitoring "github.com/newrelic/nri-postgresql/src/query-performance-monitoring"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/newrelic/nri-postgresql/src/args"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
-	"github.com/newrelic/nri-postgresql/src/connection/shun"
 	"github.com/newrelic/nri-postgresql/src/inventory"
 	"github.com/newrelic/nri-postgresql/src/metrics"
 )
@@ -80,16 +78,6 @@ func main() {
 		log.Error("Error creating instance entity: %s", err.Error())
 		os.Exit(1)
 	}
-	// Initialize shun manager for error-aware backoff. When configured, persistent
-	// failures (auth, DNS, TLS) trigger exponential backoff to avoid hammering the
-	// server on every 15-second cycle.
-	var shunMgr *shun.Manager
-	if args.ShunStateFilePath != "" {
-		shunMgr = shun.NewManager(args.ShunStateFilePath, 15*time.Second, nil)
-		shunMgr.LoadState()
-		defer shunMgr.SaveState()
-	}
-
 	if args.HasMetrics() {
 		obs := metrics.ObservabilityConfig{
 			CollectConnectionTiming:    args.CollectConnectionTiming,
@@ -98,7 +86,7 @@ func main() {
 			AvailabilityCheckTimeoutMs: args.AvailabilityCheckTimeoutMs,
 			CollectQueryTelemetry:      args.CollectQueryTelemetry,
 		}
-		metrics.PopulateMetrics(connectionInfo, collectionList, instance, pgIntegration, args.Pgbouncer, args.CollectDbLockMetrics, args.CollectBloatMetrics, args.CustomMetricsQuery, obs, shunMgr)
+		metrics.PopulateMetrics(connectionInfo, collectionList, instance, pgIntegration, args.Pgbouncer, args.CollectDbLockMetrics, args.CollectBloatMetrics, args.CustomMetricsQuery, obs)
 		if args.CustomMetricsConfig != "" {
 			metrics.PopulateCustomMetricsFromFile(connectionInfo, args.CustomMetricsConfig, pgIntegration)
 		}

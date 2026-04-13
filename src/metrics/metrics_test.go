@@ -5,14 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/newrelic/infra-integrations-sdk/v3/integration"
 	"github.com/newrelic/nri-postgresql/src/availability"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
-	"github.com/newrelic/nri-postgresql/src/connection/shun"
 	"github.com/stretchr/testify/assert"
 	tmock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -734,7 +732,7 @@ func TestPopulateMetrics(t *testing.T) {
 
 	instance, _ := testIntegration.Entity("testInstance", "instance")
 
-	PopulateMetrics(ci, dbList, instance, testIntegration, true, true, true, "", ObservabilityConfig{}, nil)
+	PopulateMetrics(ci, dbList, instance, testIntegration, true, true, true, "", ObservabilityConfig{})
 }
 
 // ---------------------------------------------------------------------------
@@ -842,7 +840,7 @@ func TestPopulateMetrics_HealthSamplesEmittedOnConnectionFailure(t *testing.T) {
 		AvailabilityCheckQuery:     "SELECT 1",
 		AvailabilityCheckTimeoutMs: 5000,
 	}
-	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs, nil)
+	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs)
 
 	require.Len(t, instance.Metrics, 2)
 
@@ -1062,182 +1060,4 @@ queries:
 	assert.Equal(t, float64(25), metricSet["int_metric"])
 	assert.Equal(t, float64(0.064), metricSet["float_metric"])
 	assert.Equal(t, "test-string", metricSet["string_metric"])
-}
-
-// ---------------------------------------------------------------------------
-// Shunning integration tests
-// ---------------------------------------------------------------------------
-
-// fakeClock for shun tests within the metrics package.
-type fakeClock struct {
-	current time.Time
-}
-
-func (c *fakeClock) Now() time.Time { return c.current }
-
-func TestPopulateMetrics_ShunnedInstanceSkipsConnection(t *testing.T) {
-	testIntegration, _ := integration.New("test", "test")
-	instance, _ := testIntegration.Entity("testhost:1234", "pg-instance")
-
-	ci := &connection.MockInfo{}
-	// NewConnection should NOT be called — the instance is shunned.
-
-	clock := &fakeClock{current: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)}
-	mgr := shun.NewManager("", 15*time.Second, clock)
-	mgr.RecordFailure("testhost:1234", "auth_failed", "password authentication failed")
-
-	obs := ObservabilityConfig{
-		EnableAvailabilityCheck: true,
-		AvailabilityCheckQuery:  "SELECT 1",
-	}
-
-	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs, mgr)
-
-	// Verify NewConnection was NOT called
-	ci.AssertNotCalled(t, "NewConnection", tmock.Anything)
-
-	// Verify health samples were emitted with shunned=true
-	require.GreaterOrEqual(t, len(instance.Metrics), 1)
-
-	found := false
-	for _, ms := range instance.Metrics {
-		m := ms.Metrics
-		if m["shunned"] == "true" {
-			found = true
-			assert.Equal(t, 0.0, m["available"])
-			assert.Equal(t, 1.0, m["hasError"])
-			assert.Equal(t, "auth_failed", m["errorCode"])
-			assert.NotNil(t, m["shunRemainingCycles"])
-		}
-	}
-	assert.True(t, found, "expected at least one health sample with shunned=true")
-}
-
-func TestPopulateMetrics_ConnectionFailureRecordsShun(t *testing.T) {
-	testIntegration, _ := integration.New("test", "test")
-	instance, _ := testIntegration.Entity("testhost:1234", "pg-instance")
-
-	ci := &connection.MockInfo{}
-	ci.On("NewConnection", tmock.Anything).Return((*connection.PGSQLConnection)(nil), errors.New("connection refused"))
-
-	clock := &fakeClock{current: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)}
-	mgr := shun.NewManager("", 15*time.Second, clock)
-
-	obs := ObservabilityConfig{
-		EnableAvailabilityCheck: true,
-		AvailabilityCheckQuery:  "SELECT 1",
-	}
-
-	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs, mgr)
-
-	// The connection_refused error is shunnable — the manager should have recorded it
-	assert.True(t, mgr.IsShunned("testhost:1234"))
-	state := mgr.GetState("testhost:1234")
-	require.NotNil(t, state)
-	assert.Equal(t, "connection_refused", state.LastErrorCode)
-}
-
-func TestPopulateMetrics_SuccessClearsShun(t *testing.T) {
-	testIntegration, _ := integration.New("test", "test")
-	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
-
-	ci := &connection.MockInfo{}
-	testConnection, mock := connection.CreateMockSQL(t)
-	ci.On("NewConnection", tmock.Anything).Return(testConnection, nil)
-
-	// SET statement_timeout from ExplicitCheck
-	mock.ExpectQuery("SET statement_timeout").WillReturnRows(sqlmock.NewRows(nil))
-	// SELECT 1 canary query
-	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"?column?"}).AddRow(1))
-	// version query
-	mock.ExpectQuery(".*server_version.*").WillReturnRows(sqlmock.NewRows([]string{"server_version"}).AddRow("17.0"))
-
-	clock := &fakeClock{current: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)}
-	mgr := shun.NewManager("", 15*time.Second, clock)
-	// Pre-shun the instance
-	mgr.RecordFailure("testInstance", "auth_failed", "msg")
-	// Advance past shun window so IsShunned returns false
-	clock.current = clock.current.Add(5 * time.Minute)
-
-	obs := ObservabilityConfig{
-		EnableAvailabilityCheck:    true,
-		AvailabilityCheckQuery:     "SELECT 1",
-		AvailabilityCheckTimeoutMs: 5000,
-	}
-
-	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs, mgr)
-
-	// Shun should be cleared on success
-	assert.False(t, mgr.IsShunned("testInstance"))
-	assert.Nil(t, mgr.GetState("testInstance"))
-}
-
-func TestPopulateMetrics_NilShunManagerIsNoOp(t *testing.T) {
-	testIntegration, _ := integration.New("test", "test")
-	instance, _ := testIntegration.Entity("testInstance", "pg-instance")
-
-	ci := &connection.MockInfo{}
-	ci.On("NewConnection", tmock.Anything).Return((*connection.PGSQLConnection)(nil), errors.New("connection refused"))
-
-	obs := ObservabilityConfig{
-		EnableAvailabilityCheck: true,
-		AvailabilityCheckQuery:  "SELECT 1",
-	}
-
-	// Should not panic with nil shunMgr
-	PopulateMetrics(ci, collection.DatabaseList{}, instance, testIntegration, false, false, false, "", obs, nil)
-
-	require.Len(t, instance.Metrics, 2, "should still emit implicit + explicit health samples")
-}
-
-// ---------------------------------------------------------------------------
-// publishShunnedHealthSample
-// ---------------------------------------------------------------------------
-
-func TestPublishShunnedHealthSample(t *testing.T) {
-	testIntegration, _ := integration.New("test", "test")
-	instance, _ := testIntegration.Entity("testhost:5432", "pg-instance")
-
-	state := &shun.InstanceState{
-		LastErrorCode:    "auth_failed",
-		LastErrorMessage: "password authentication failed for user \"newrelic\"",
-		BackoffCycles:    8,
-	}
-
-	publishShunnedHealthSample(instance, state, 5)
-
-	require.Len(t, instance.Metrics, 2, "should emit implicit + explicit samples")
-
-	for _, ms := range instance.Metrics {
-		m := ms.Metrics
-		assert.Equal(t, "PostgresqlHealthSample", m["event_type"])
-		assert.Equal(t, 0.0, m["available"])
-		assert.Equal(t, 1.0, m["hasError"])
-		assert.Equal(t, "auth_failed", m["errorCode"])
-		assert.Equal(t, "true", m["shunned"])
-		assert.Equal(t, 5.0, m["shunRemainingCycles"])
-		assert.Equal(t, 8.0, m["shunBackoffCycles"])
-	}
-
-	checkTypes := map[string]bool{}
-	for _, ms := range instance.Metrics {
-		checkTypes[ms.Metrics["checkType"].(string)] = true
-	}
-	assert.True(t, checkTypes["implicit"])
-	assert.True(t, checkTypes["explicit"])
-}
-
-// ---------------------------------------------------------------------------
-// Pool lifecycle: MaxOpenConns guard
-// ---------------------------------------------------------------------------
-
-func TestNewConnectionSetsMaxOpenConns(t *testing.T) {
-	// Verify that NewConnection sets MaxOpenConns=1 on the underlying sql.DB.
-	// We can't easily inspect the stdlib.OpenDB pool from outside, so this test
-	// verifies the behavior via CreateMockSQL which creates a similar pool.
-	// The real assertion is that the production code in pgsql_connection.go line
-	// "db.SetMaxOpenConns(1)" exists — this test documents the expectation.
-	conn, _ := connection.CreateMockSQL(t)
-	// connection.Close should not panic — tests the close path is clean
-	conn.Close()
 }
