@@ -1,17 +1,20 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"reflect"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/newrelic/infra-integrations-sdk/v3/data/attribute"
 	"github.com/newrelic/infra-integrations-sdk/v3/data/metric"
 	"github.com/newrelic/infra-integrations-sdk/v3/integration"
 	"github.com/newrelic/infra-integrations-sdk/v3/log"
+	"github.com/newrelic/nri-postgresql/src/availability"
 	"github.com/newrelic/nri-postgresql/src/collection"
 	"github.com/newrelic/nri-postgresql/src/connection"
 	yaml "gopkg.in/yaml.v3"
@@ -19,7 +22,18 @@ import (
 
 const (
 	versionQuery = `SHOW server_version`
+
+	healthSampleEventType = "PostgresqlHealthSample"
 )
+
+// ObservabilityConfig holds the optional APM-style observability settings passed to PopulateMetrics.
+type ObservabilityConfig struct {
+	CollectConnectionTiming    bool
+	EnableAvailabilityCheck    bool
+	AvailabilityCheckQuery     string
+	AvailabilityCheckTimeoutMs int
+	CollectQueryTelemetry      bool
+}
 
 // PopulateMetrics collects metrics for each type
 func PopulateMetrics(
@@ -28,14 +42,72 @@ func PopulateMetrics(
 	instance *integration.Entity,
 	i *integration.Integration,
 	collectPgBouncer, collectDbLocks, collectBloat bool,
-	customMetricsQuery string) {
+	customMetricsQuery string,
+	obs ObservabilityConfig) {
 
 	con, err := ci.NewConnection(ci.DatabaseName())
+
 	if err != nil {
 		log.Error("Metrics collection failed: error creating connection to PostgreSQL: %s", err.Error())
+		// Emit health samples on connection failure only when observability is enabled,
+		// so there is no gap in the time series for alerting.
+		if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+			publishImplicitHealthSample(instance, con, err)
+		}
+		if obs.EnableAvailabilityCheck {
+			q := obs.AvailabilityCheckQuery
+			if q == "" {
+				q = availability.DefaultQuery
+			}
+			errCode, errMsg := connection.ClassifyError(err)
+			publishExplicitHealthSample(instance, &availability.CheckResult{
+				Available:    false,
+				Query:        q,
+				ErrorCode:    errCode,
+				ErrorMessage: errMsg,
+			})
+		}
 		return
 	}
 	defer con.Close()
+
+	// Before publishing the implicit health sample, ensure the pgx DialFunc has fired
+	// so that con.Timing carries real DNS/TCP values instead of zeros.
+	//
+	// When ENABLE_AVAILABILITY_CHECK is true the ExplicitCheck below triggers the dial.
+	// When only COLLECT_CONNECTION_TIMING is true we issue a lightweight Ping instead.
+	// Either way the order is: trigger dial → publishImplicitHealthSample → everything else.
+	var explicitResult *availability.CheckResult
+	var connErr error
+	if obs.EnableAvailabilityCheck {
+		q := obs.AvailabilityCheckQuery
+		if q == "" {
+			q = availability.DefaultQuery
+		}
+		timeoutMs := obs.AvailabilityCheckTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = 10000
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+		explicitResult = availability.ExplicitCheck(ctx, con, q)
+		cancel()
+		if !explicitResult.Available {
+			connErr = &connection.ClassifiedError{Code: explicitResult.ErrorCode, Msg: explicitResult.ErrorMessage}
+		}
+	} else if obs.CollectConnectionTiming {
+		// No availability check — ping to trigger the DialFunc before reading con.Timing.
+		connErr = con.Ping()
+	}
+
+	// Emit health samples only when at least one observability flag is active.
+	// With no flags set, the integration produces identical output to the upstream baseline.
+	if obs.EnableAvailabilityCheck || obs.CollectConnectionTiming {
+		publishImplicitHealthSample(instance, con, connErr)
+	}
+
+	if explicitResult != nil {
+		publishExplicitHealthSample(instance, explicitResult)
+	}
 
 	version, err := CollectVersion(con)
 	if err != nil {
@@ -54,14 +126,116 @@ func PopulateMetrics(
 		PopulateCustomMetrics(customMetricsQuery, i, con, ci, instance)
 	}
 
+	// Drain and publish per-query health samples accumulated during the collection above.
+	if obs.CollectQueryTelemetry {
+		publishQueryHealthSamples(instance, con.DrainTelemetry())
+	}
+
 	if collectPgBouncer {
-		con, err = ci.NewConnection("pgbouncer")
-		if err != nil {
-			log.Error("Error creating connection to pgbouncer database: %s", err)
+		pgbCon, pgbErr := ci.NewConnection("pgbouncer")
+		if pgbErr != nil {
+			log.Error("Error creating connection to pgbouncer database: %s", pgbErr)
 		} else {
-			defer con.Close()
-			PopulatePgBouncerMetrics(i, con, ci)
+			defer pgbCon.Close()
+			PopulatePgBouncerMetrics(i, pgbCon, ci)
+			if obs.CollectQueryTelemetry {
+				publishQueryHealthSamples(instance, pgbCon.DrainTelemetry())
+			}
 		}
+	}
+}
+
+// healthSampleAttrs returns the standard attributes for a PostgresqlHealthSample.
+func healthSampleAttrs(instance *integration.Entity) []attribute.Attribute {
+	return []attribute.Attribute{
+		{Key: "displayName", Value: instance.Metadata.Name},
+		{Key: "entityName", Value: instance.Metadata.Namespace + ":" + instance.Metadata.Name},
+	}
+}
+
+// publishImplicitHealthSample emits a PostgresqlHealthSample with checkType=implicit
+// capturing the ping-based availability signal and connection phase timings.
+func publishImplicitHealthSample(instance *integration.Entity, con *connection.PGSQLConnection, connErr error) {
+	attrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "implicit"})
+	ms := instance.NewMetricSet(healthSampleEventType, attrs...)
+
+	hasError := 0.0
+	if connErr != nil {
+		hasError = 1.0
+		setGauge(ms, "available", 0)
+		errCode, errMsg := connection.ClassifyError(connErr)
+		setAttribute(ms, "errorCode", errCode)
+		setAttribute(ms, "errorMessage", errMsg)
+	} else {
+		setGauge(ms, "available", 1)
+	}
+	setGauge(ms, "hasError", hasError)
+
+	if con != nil && con.Timing != nil {
+		setGauge(ms, "dnsLookupMs", con.Timing.DNSLookupMs)
+		setGauge(ms, "tcpConnectMs", con.Timing.TCPConnectMs)
+		if con.Timing.TLSHandshakeMs > 0 {
+			setGauge(ms, "tlsHandshakeMs", con.Timing.TLSHandshakeMs)
+		}
+	}
+}
+
+// publishExplicitHealthSample emits a PostgresqlHealthSample with checkType=explicit
+// carrying the canary query result.
+func publishExplicitHealthSample(instance *integration.Entity, result *availability.CheckResult) {
+	attrs := append(healthSampleAttrs(instance), attribute.Attribute{Key: "checkType", Value: "explicit"})
+	ms := instance.NewMetricSet(healthSampleEventType, attrs...)
+
+	available := 0.0
+	hasError := 0.0
+	if result.Available {
+		available = 1.0
+	} else {
+		hasError = 1.0
+	}
+	setGauge(ms, "available", available)
+	setGauge(ms, "hasError", hasError)
+	setGauge(ms, "durationMs", result.DurationMs)
+	setAttribute(ms, "query", result.Query)
+	if result.ErrorCode != "" {
+		setAttribute(ms, "errorCode", result.ErrorCode)
+		setAttribute(ms, "errorMessage", result.ErrorMessage)
+	}
+}
+
+// publishQueryHealthSamples emits one PostgresqlHealthSample per internal monitoring
+// query with checkType=query.
+func publishQueryHealthSamples(instance *integration.Entity, entries []*connection.QueryTelemetry) {
+	baseAttrs := healthSampleAttrs(instance)
+	for _, t := range entries {
+		entryAttrs := append(baseAttrs,
+			attribute.Attribute{Key: "checkType", Value: "query"},
+			attribute.Attribute{Key: "queryName", Value: t.QueryName},
+			attribute.Attribute{Key: "database", Value: t.Database},
+		)
+		ms := instance.NewMetricSet(healthSampleEventType, entryAttrs...)
+		setGauge(ms, "durationMs", t.DurationMs)
+		hasError := 0.0
+		if t.HasError {
+			hasError = 1.0
+		}
+		setGauge(ms, "hasError", hasError)
+		if t.ErrorCode != "" {
+			setAttribute(ms, "errorCode", t.ErrorCode)
+			setAttribute(ms, "errorMessage", t.ErrorMessage)
+		}
+	}
+}
+
+func setGauge(ms *metric.Set, name string, val float64) {
+	if err := ms.SetMetric(name, val, metric.GAUGE); err != nil {
+		log.Warn("Failed to set metric %s: %s", name, err)
+	}
+}
+
+func setAttribute(ms *metric.Set, name, val string) {
+	if err := ms.SetMetric(name, val, metric.ATTRIBUTE); err != nil {
+		log.Warn("Failed to set attribute %s: %s", name, err)
 	}
 }
 
@@ -355,14 +529,15 @@ func PopulateTableMetrics(databases collection.DatabaseList, version *semver.Ver
 			return
 		}
 
-		// Create a new connection to the database
-		con, err := ci.NewConnection(database)
-		if err != nil {
-			log.Error("Failed to connect to database %s: %s", database, err.Error())
-			continue
-		}
-		defer con.Close()
-		populateTableMetricsForDatabase(schemaList, version, con, pgIntegration, ci, collectBloat)
+		func() {
+			con, err := ci.NewConnection(database)
+			if err != nil {
+				log.Error("Failed to connect to database %s: %s", database, err.Error())
+				return
+			}
+			defer con.Close()
+			populateTableMetricsForDatabase(schemaList, version, con, pgIntegration, ci, collectBloat)
+		}()
 	}
 }
 
@@ -422,13 +597,15 @@ func populateTableMetricsForDatabase(schemaList collection.SchemaList, version *
 // PopulateIndexMetrics populates the metrics for an index
 func PopulateIndexMetrics(databases collection.DatabaseList, pgIntegration *integration.Integration, ci connection.Info) {
 	for database, schemaList := range databases {
-		con, err := ci.NewConnection(database)
-		if err != nil {
-			log.Error("Failed to create new connection to database %s: %s", database, err.Error())
-			continue
-		}
-		defer con.Close()
-		populateIndexMetricsForDatabase(schemaList, con, pgIntegration, ci)
+		func() {
+			con, err := ci.NewConnection(database)
+			if err != nil {
+				log.Error("Failed to create new connection to database %s: %s", database, err.Error())
+				return
+			}
+			defer con.Close()
+			populateIndexMetricsForDatabase(schemaList, con, pgIntegration, ci)
+		}()
 	}
 }
 

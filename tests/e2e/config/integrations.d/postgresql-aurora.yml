@@ -1,0 +1,38 @@
+integrations:
+  - name: nri-postgresql
+    env:
+      USERNAME: ${AURORA_USER}
+      PASSWORD: ${AURORA_PASSWORD}
+      HOSTNAME: ${AURORA_HOST}
+      PORT: ${AURORA_PORT:-5432}
+      DATABASE: ${AURORA_DB:-postgres}
+      COLLECTION_LIST: 'ALL'
+
+      COLLECT_DB_LOCK_METRICS: "false"
+      COLLECT_BLOAT_METRICS: "false"   # can be expensive on large Aurora schemas
+
+      # Aurora requires SSL — set TRUST_SERVER_CERTIFICATE to true to skip
+      # cert validation, or point at the RDS CA bundle with SSL_ROOT_CERT_LOCATION.
+      ENABLE_SSL: ${AURORA_SSL:-true}
+      TRUST_SERVER_CERTIFICATE: "true"
+
+      # RDS/Aurora specific
+      IS_RDS: "true"
+
+      # ── New observability flags ─────────────────────────────────────────────
+      COLLECT_CONNECTION_TIMING: "true"
+      ENABLE_AVAILABILITY_CHECK: "true"
+      AVAILABILITY_CHECK_QUERY: "SELECT 1"
+      AVAILABILITY_CHECK_TIMEOUT_MS: "5000"
+      COLLECT_QUERY_TELEMETRY: "true"
+
+    interval: 30s
+    labels:
+      team: platform
+      service_type: postgresql
+      environment: e2e-aurora
+      region: us-east-1
+      geo: na
+      instance: aurora-postgres
+      role: primary
+      service_name: aurora-demo

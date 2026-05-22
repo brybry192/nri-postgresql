@@ -1,0 +1,1919 @@
+{
+  "name": "PostgreSQL Overview",
+  "description": null,
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "PostgreSQL Availability",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Database Availability Uptime %",
+          "description": "Availability (available) is a point-in-time signal: \"can I reach this database right now?\" It's a binary 0 or 1 captured each collection cycle.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 2,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "Health Check Error Rate",
+          "description": "Error rate across all check types (implicit, explicit, query). A non-zero rate indicates connectivity, auth, or query issues.",
+          "layout": {
+            "column": 4,
+            "row": 1,
+            "width": 1,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE hasError = 1) AS 'Error Rate %' FROM PostgresqlHealthSample WHERE displayName IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}})"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 0.005
+                },
+                {
+                  "from": 0.005,
+                  "severity": "warning",
+                  "to": 0.05
+                },
+                {
+                  "from": 0.05,
+                  "severity": "critical",
+                  "to": 1
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "DB Fleet Status",
+          "description": "How many instances are reporting and their current availability state.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT uniqueCount(displayName) as 'total instances', filter(uniqueCount(displayName), WHERE available = 1) AS 'up', filter(uniqueCount(displayName), WHERE available = 0) AS 'down' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) SINCE 10 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": null,
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 12
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Database Availability & Uptime\n---\n\n#### Availability\nA **point-in-time** signal captured each collection cycle: *can I reach this database right now?*\n\nAll checks emit `PostgresqlHealthSample` with a `checkType` attribute:\n\n| checkType | Method | What it proves |\n|---|---|---|\n| **implicit** | PostgreSQL protocol ping | Server is listening and responds at the wire level |\n| **explicit** | Canary SQL query (e.g. `SELECT 1`) | Query parser, execution engine, and auth layer are functional |\n| **query** | Internal monitoring queries | Individual query health and duration |\n\n> Implicit is lightweight but won't catch connection exhaustion or permission issues. Explicit exercises the full query path.\n\n---\n\n#### Uptime %\nAvailability **aggregated over a time window** \u2014 what fraction of checks succeeded?\n\nUptime % = (successful checks / total checks) \u00d7 100\n\nAt a **10s interval** over 5 minutes \u2248 30 checks. If 1 fails \u2192 **96.7% uptime**.\n\n> **Important:** These checks measure availability from the integration\u2019s perspective using a single monitoring user. Not every error means the database is down for all consumers. For example, a `pg_error_28` (authentication failure) may indicate a credential issue specific to the monitoring user while the database remains fully available to application traffic. This makes availability monitoring a strong proxy for uptime, but not a guarantee \u2014 treat it as one signal alongside application-level health checks.\n\n---\n\n#### Connection Timing (implicit only)\n\n| Metric | Definition |\n|---|---|\n| **`dnsLookupMs`** | Time to resolve the hostname to an IP via DNS |\n| **`tcpConnectMs`** | Time for the TCP three-way handshake to the resolved IP |\n| **`tlsHandshakeMs`** | Time for the TLS/SSL negotiation (only when SSL is enabled) |\n\n> A spike in DNS or TCP time indicates infrastructure issues, not PostgreSQL. A spike in `tlsHandshakeMs` suggests certificate chain or negotiation issues. A spike in `durationMs` with normal connection timing suggests PostgreSQL-level contention.\n\n---\n\n#### Error Codes\n\nSee [PostgreSQL Error Codes](https://www.postgresql.org/docs/current/errcodes-appendix.html) for full SQLSTATE reference.\n\n| Code | Cause |\n|---|---|\n| `timeout` | Query or connection exceeded deadline |\n| `pg_error_28` | Authentication failure ([SQLSTATE class 28](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `pg_error_42` | Syntax / permission error ([SQLSTATE class 42](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `pg_error_57` | Query canceled / admin shutdown ([SQLSTATE class 57](https://www.postgresql.org/docs/current/errcodes-appendix.html#ERRCODES-TABLE)) |\n| `connection_refused` | Server not listening |\n| `dns_resolution_failed` | Hostname cannot be resolved |\n| `tls_error` | Certificate or TLS handshake failure |\n\n---\n\n#### Resources\n- [PostgreSQL SSL/TLS Support](https://www.postgresql.org/docs/current/ssl-tcp.html)\n- [PostgreSQL Error Codes](https://www.postgresql.org/docs/current/errcodes-appendix.html)\n- [pg_stat_activity](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW)\n- [nri-postgresql Integration](https://docs.newrelic.com/docs/infrastructure/host-integrations/host-integrations-list/postgresql-monitoring-integration/)\n- [NRQL Reference](https://docs.newrelic.com/docs/nrql/get-started/introduction-nrql-new-relics-query-language/)\n"
+          }
+        },
+        {
+          "title": "Uptime % Over Time",
+          "description": "Database Availability by Instance over time",
+          "layout": {
+            "column": 1,
+            "row": 2,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "chartStyles": {
+              "lineInterpolation": "linear"
+            },
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "markers": {
+              "displayedTypes": {
+                "annotations": true,
+                "criticalViolations": false,
+                "deployments": true,
+                "relatedDeployments": true,
+                "warningViolations": false
+              }
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": {
+              "isLabelVisible": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            },
+            "yAxisRight": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Response Time Max ms (DNS + TCP + TLS + Total)",
+          "description": "Connection phase breakdown: DNS resolution, TCP handshake, TLS negotiation, and total query duration across implicit and explicit checks.",
+          "layout": {
+            "column": 5,
+            "row": 2,
+            "width": 4,
+            "height": 4
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT max(dnsLookupMs) AS 'dnsLookup', max(tcpConnectMs) AS 'tcpConnect', max(tlsHandshakeMs) AS 'tlsHandshake', max(durationMs) AS 'total' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) TIMESERIES FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Slowest Internal Queries \u2014 avg (ms)",
+          "description": "Top internal monitoring queries by average duration. High values may indicate PostgreSQL server pressure.",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(durationMs) AS 'avg' FROM PostgresqlHealthSample WHERE checkType = 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET queryName LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Query Duration Over Time \u2014 avg (ms)",
+          "description": "Internal monitoring query performance trends. Spikes correlate with PostgreSQL load.",
+          "layout": {
+            "column": 5,
+            "row": 6,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(durationMs) AS 'avg', percentile(durationMs, 95) AS 'p95' FROM PostgresqlHealthSample WHERE checkType = 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Availability by Service",
+          "description": "Uptime grouped by service_name \u2014 useful for comparing health across deploys.",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.service_name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "Availability by AZ",
+          "description": "Uptime grouped by availability zone \u2014 surfaces zone-specific outages.",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET label.availability_zone"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "Errors Over Time",
+          "description": "Error count by classified error code across all check types.",
+          "layout": {
+            "column": 1,
+            "row": 9,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT count(*) FROM PostgresqlHealthSample WHERE hasError = 1 AND displayName IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode, displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Error Breakdown",
+          "description": "Distribution of errors by type.",
+          "layout": {
+            "column": 5,
+            "row": 9,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT count(*) FROM PostgresqlHealthSample WHERE hasError = 1 AND displayName IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Recent Errors",
+          "description": "Most recent error per unique error code combination.",
+          "layout": {
+            "column": 1,
+            "row": 11,
+            "width": 8,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(errorMessage), latest(durationMs), latest(checkType) FROM PostgresqlHealthSample WHERE hasError = 1 AND displayName IN ({{instance}}) AND checkType IN ({{checkType}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET errorCode, displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Health Check Configuration",
+          "description": "Active check types and canary queries per monitored instance.",
+          "layout": {
+            "column": 1,
+            "row": 13,
+            "width": 8,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(query), latest(label.role), latest(label.service_name), latest(label.availability_zone), latest(label.environment), latest(database) FROM PostgresqlHealthSample WHERE displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}}) FACET displayName SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Fleet Uptime %",
+          "description": "Aggregate uptime across all instances \u2014 not faceted.",
+          "layout": {
+            "column": 3,
+            "row": 1,
+            "width": 1,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT percentage(count(*), WHERE available = 1) AS 'Uptime %' FROM PostgresqlHealthSample WHERE checkType IN ({{checkType}}) AND checkType != 'query' AND displayName IN ({{instance}}) AND label.service_name IN ({{service_name}}) AND label.role IN ({{role}}) AND label.environment IN ({{environment}})"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0.999,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0.98,
+                  "severity": "warning",
+                  "to": 0.999
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0.98
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Server Internals",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Markdown \u2014 Instance Performance",
+          "description": "",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 8
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Server Internals\n---\n\nMetrics from PostgreSQL's background writer and I/O subsystem.\n\n#### Key Indicators\n\n| Metric | What to watch |\n|---|---|\n| **Checkpoints** | Frequent *requested* checkpoints indicate WAL pressure \u2014 consider increasing `checkpoint_completion_target` or `max_wal_size` |\n| **Backend writes** | High backend buffer writes mean the bgwriter isn't keeping up \u2014 tune `bgwriter_lru_maxpages` |\n| **Buffer allocation** | Sustained high allocation rates may indicate insufficient `shared_buffers` |\n| **Checkpoint timing** | Long sync times suggest I/O bottleneck on the storage layer |\n\n---\n\n#### Resources\n- [pg_stat_bgwriter](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-BGWRITER-VIEW)\n- [WAL Configuration](https://www.postgresql.org/docs/current/wal-configuration.html)\n- [Background Writer](https://www.postgresql.org/docs/current/runtime-config-resource.html#RUNTIME-CONFIG-RESOURCE-BACKGROUND-WRITER)\n"
+          }
+        },
+        {
+          "title": "Checkpoints \u2014 scheduled vs requested",
+          "description": "Scheduled checkpoints are normal. Requested checkpoints indicate WAL pressure.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT rate(sum(bgwriter.checkpointsScheduledPerSecond), 1 minute) AS 'scheduled', rate(sum(bgwriter.checkpointsRequestedPerSecond), 1 minute) AS 'requested' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Checkpoint Write + Sync Time (ms)",
+          "description": "High sync times indicate storage I/O bottleneck.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(bgwriter.checkpointWriteTimeInMillisecondsPerSecond) AS 'write', average(bgwriter.checkpointSyncTimeInMillisecondsPerSecond) AS 'sync' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "yAxisUnit": "MILLISECONDS"
+            }
+          }
+        },
+        {
+          "title": "Buffer Writes \u2014 bgwriter vs backend",
+          "description": "Backend writes should be low. If backend > bgwriter, tune bgwriter_lru_maxpages.",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(bgwriter.buffersWrittenByBackgroundWriterPerSecond) AS 'bgwriter', average(bgwriter.buffersWrittenByBackendPerSecond) AS 'backend', average(bgwriter.buffersWrittenForCheckpointsPerSecond) AS 'checkpoint' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Buffers Allocated / sec",
+          "description": "Sustained high allocation may indicate insufficient shared_buffers.",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(bgwriter.buffersAllocatedPerSecond) AS 'allocated' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Backend Fsync Calls / sec",
+          "description": "Should be near zero. Non-zero means backends are forced to fsync \u2014 bgwriter can't keep up.",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(bgwriter.backendFsyncCallsPerSecond) AS 'fsync' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Background Writer Stops / sec",
+          "description": "Stops indicate bgwriter hit bgwriter_lru_maxpages limit.",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(bgwriter.backgroundWriterStopsPerSecond) AS 'stops' FROM PostgresqlInstanceSample WHERE displayName IN ({{instance}}) TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workload & Throughput",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Markdown \u2014 Database Health",
+          "description": "",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 10
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Workload & Throughput\n---\n\nPer-database activity from [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW).\n\n#### Key Ratios\n\n| Metric | Healthy | Investigate |\n|---|---|---|\n| **Cache hit ratio** | > 99% | < 95% \u2014 shared_buffers may be too small |\n| **Commit ratio** | > 99% | < 95% \u2014 high rollback rate suggests app errors |\n| **Rows fetched / returned** | Close to 1:1 | Large gap means many rows scanned but few used \u2014 missing indexes |\n\n#### Deadlocks & Temp Files\n\n- **Deadlocks** should be 0 in steady state. Persistent deadlocks indicate lock ordering issues.\n- **Temp files** are created when `work_mem` is too small for sorts/joins. Frequent creation means tuning is needed.\n\n---\n\n#### Resources\n- [pg_stat_database](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-DATABASE-VIEW)\n- [Tuning shared_buffers](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-SHARED-BUFFERS)\n- [Tuning work_mem](https://www.postgresql.org/docs/current/runtime-config-resource.html#GUC-WORK-MEM)\n"
+          }
+        },
+        {
+          "title": "Connections (active / max)",
+          "description": "Watch for active approaching max \u2014 connections exhaustion causes outages.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(db.connections) AS 'active', latest(db.maxconnections) AS 'max' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Cache Hit Ratio %",
+          "description": "Should be > 99%. Below 95% suggests shared_buffers is too small.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT 100 * sum(db.bufferHitsPerSecond) / (sum(db.bufferHitsPerSecond) + sum(db.readsPerSecond) + 0.001) AS 'hit ratio' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Transaction Rate \u2014 commits vs rollbacks",
+          "description": "High rollback rate relative to commits indicates application-level errors.",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.commitsPerSecond) AS 'commits', average(db.rollbacksPerSecond) AS 'rollbacks' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Row Activity \u2014 inserts / updates / deletes",
+          "description": "Baseline for normal write activity. Spikes may correlate with batch jobs.",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.rowsInsertedPerSecond) AS 'inserts', average(db.rowsUpdatedPerSecond) AS 'updates', average(db.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Rows Returned vs Fetched",
+          "description": "Large gap between returned and fetched suggests missing indexes \u2014 many rows scanned but few used.",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.rowsReturnedPerSecond) AS 'returned', average(db.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Deadlocks / sec",
+          "description": "Should be 0. Non-zero indicates lock contention.",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 2,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.deadlocksPerSecond) AS 'deadlocks/s' FROM PostgresqlDatabaseSample FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 0
+                },
+                {
+                  "from": 0,
+                  "severity": "warning",
+                  "to": 0.1
+                },
+                {
+                  "from": 0.1,
+                  "severity": "critical",
+                  "to": 1000
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "Temp Files Created / sec",
+          "description": "High rate means work_mem is too small for sorts/joins.",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 2,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.tempFilesCreatedPerSecond) AS 'temp files/s' FROM PostgresqlDatabaseSample FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 1,
+                  "severity": "warning",
+                  "to": 10
+                },
+                {
+                  "from": 10,
+                  "severity": "critical",
+                  "to": 100000
+                }
+              ]
+            },
+            "displayMode": "valueAndLabel"
+          }
+        },
+        {
+          "title": "Temp Bytes Written / sec",
+          "description": "Correlates with temp file creation. Large values confirm work_mem tuning opportunity.",
+          "layout": {
+            "column": 5,
+            "row": 8,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.tempWrittenInBytesPerSecond) AS 'bytes/s' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "I/O Time \u2014 read vs write (ms/s)",
+          "description": "Time spent on physical I/O. High values indicate storage saturation.",
+          "layout": {
+            "column": 1,
+            "row": 10,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.readTimeInMillisecondsPerSecond) AS 'read', average(db.writeTimeInMillisecondsPerSecond) AS 'write' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Conflict Rate (replicas)",
+          "description": "Only relevant on streaming replicas. Non-zero indicates replication conflicts.",
+          "layout": {
+            "column": 5,
+            "row": 10,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT average(db.conflicts.locksPerSecond) AS 'locks', average(db.conflicts.snapshotPerSecond) AS 'snapshot', average(db.conflicts.deadlockPerSecond) AS 'deadlock' FROM PostgresqlDatabaseSample FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tables & Indexes",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Markdown \u2014 Tables & Indexes",
+          "description": "",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 10
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Tables & Indexes\n---\n\nPer-table and per-index statistics from [pg_stat_user_tables](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ALL-TABLES-VIEW) and [pg_stat_user_indexes](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ALL-INDEXES-VIEW).\n\n#### Scan Types\n\n| Scan | Meaning |\n|---|---|\n| **Sequential** | Full table scan \u2014 fine for small tables, costly for large ones |\n| **Index** | Uses an index to find rows \u2014 efficient |\n\nA high seq scan rate on large tables is a strong signal for a missing index.\n\n#### Dead Rows & Vacuuming\n\nDead rows accumulate from UPDATE/DELETE. Autovacuum reclaims them.\n- **dead rows / live rows > 10%** \u2014 autovacuum may be falling behind\n- **Long time since last vacuum** \u2014 check autovacuum settings\n\n#### Bloat\n\nTable bloat ratio shows wasted space from dead rows not yet reclaimed. High bloat (> 50%) degrades scan performance.\n\n---\n\n#### Resources\n- [Routine Vacuuming](https://www.postgresql.org/docs/current/routine-vacuuming.html)\n- [Index Types](https://www.postgresql.org/docs/current/indexes-types.html)\n- [EXPLAIN Basics](https://www.postgresql.org/docs/current/using-explain.html)\n"
+          }
+        },
+        {
+          "title": "Largest Tables by Size",
+          "description": "Largest tables by total size (data + indexes + TOAST).",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(table.totalSizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlTableSample FACET database, schema, displayName LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Sequential vs Index Scans / sec",
+          "description": "Index scans should dominate. High seq scans on large tables = missing indexes.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT sum(table.sequentialScansPerSecond) AS 'seq scans', sum(table.indexScansPerSecond) AS 'idx scans' FROM PostgresqlTableSample TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Dead Rows \u2014 top tables",
+          "description": "Tables with high dead rows need vacuum attention.",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(table.deadRows) AS 'dead rows' FROM PostgresqlTableSample FACET database, schema, displayName LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Table Bloat Ratio \u2014 top tables",
+          "description": "Bloat > 50% degrades performance. Consider VACUUM FULL or pg_repack.",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(table.bloatRatio) AS 'bloat %' FROM PostgresqlTableSample WHERE table.bloatRatio IS NOT NULL FACET database, schema, displayName LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Row Writes \u2014 inserts / updates / deletes",
+          "description": "Write activity across all monitored tables.",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT sum(table.rowsInsertedPerSecond) AS 'inserts', sum(table.rowsUpdatedPerSecond) AS 'updates', sum(table.rowsDeletedPerSecond) AS 'deletes' FROM PostgresqlTableSample TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Index Size \u2014 top indexes",
+          "description": "Largest indexes. Unused large indexes waste space and slow writes.",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(index.sizeInBytes) / 1e6 AS 'size MB' FROM PostgresqlIndexSample FACET database, schema, displayName, index_name LIMIT 15"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Index Reads vs Fetches / sec",
+          "description": "Index read = entries scanned, fetched = rows returned. Large gap = inefficient index.",
+          "layout": {
+            "column": 1,
+            "row": 10,
+            "width": 8,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT sum(index.rowsReadPerSecond) AS 'read', sum(index.rowsFetchedPerSecond) AS 'fetched' FROM PostgresqlIndexSample TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replication",
+      "description": null,
+      "widgets": [
+        {
+          "title": null,
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 10
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## Replication\n---\n\nMetrics from custom queries against `pg_stat_replication` (primary) and `pg_stat_wal_receiver` (replica).\n\n#### How it works\n\nThe integration runs three custom SQL queries each cycle:\n\n1. **`pg_is_in_recovery()`** \u2014 returns `0` on primaries, `1` on replicas. Tracks server role so dashboards can detect failovers.\n2. **`pg_stat_replication`** \u2014 queried on the primary. Returns one row per connected replica with replication lag in bytes.\n3. **`pg_stat_wal_receiver`** \u2014 queried on the replica. Confirms streaming is active and shows pending WAL bytes.\n\nThese use the `CUSTOM_METRICS_CONFIG` flag pointing to `custom-queries.yml`. Results appear as `PgCustomQuerySample` events.\n\n---\n\n#### Key Indicators\n\n| Metric | Healthy | Investigate |\n|---|---|---|\n| **Replication lag** | < 1 MB | > 10 MB sustained \u2014 replica can't keep up |\n| **WAL receiver** | `streaming` | `catchup` or missing \u2014 check network/replica load |\n| **Recovery mode** | Stable 0 or 1 | Value flips \u2014 failover occurred |\n\n---\n\n#### Resources\n- [pg_stat_replication](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-REPLICATION-VIEW)\n- [pg_stat_wal_receiver](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-WAL-RECEIVER-VIEW)\n- [Streaming Replication](https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION)\n- [pg_is_in_recovery()](https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-RECOVERY-INFO-TABLE)\n"
+          }
+        },
+        {
+          "title": "Server Role",
+          "description": "0 = primary, 1 = replica. A change indicates failover.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'in recovery' FROM PgCustomQuerySample WHERE metric_name = 'pg.isInRecovery' FACET displayName, server_role"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 0,
+                  "severity": "success",
+                  "to": 0
+                },
+                {
+                  "from": 1,
+                  "severity": "warning",
+                  "to": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "WAL Receiver Status",
+          "description": "1 = streaming (healthy). 0 or missing = replication broken.",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 1
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'active' FROM PgCustomQuerySample WHERE metric_name = 'pg.walReceiver.active' FACET displayName, receiver_status"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "displayMode": "valueAndLabel",
+            "thresholdsWithSeriesOverrides": {
+              "thresholds": [
+                {
+                  "from": 1,
+                  "severity": "success",
+                  "to": 1
+                },
+                {
+                  "from": 0,
+                  "severity": "critical",
+                  "to": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Replication Lag (bytes)",
+          "description": "Bytes of WAL the replica is behind. Should be low and stable.",
+          "layout": {
+            "column": 1,
+            "row": 2,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT max(metric_value) AS 'lag bytes' FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Replication Lag Over Time",
+          "description": "Same as lag bytes but in MB for readability at scale.",
+          "layout": {
+            "column": 5,
+            "row": 2,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT max(metric_value) / 1e6 AS 'lag MB' FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Server Role Over Time",
+          "description": "Tracks recovery mode over time. A flip from 0\u21921 or 1\u21920 indicates a failover event.",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'in recovery' FROM PgCustomQuerySample WHERE metric_name = 'pg.isInRecovery' FACET displayName TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Replication Details",
+          "description": "Per-replica replication details from the primary.",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'lag bytes', latest(replication_state), latest(sync_mode), latest(replica_addr) FROM PgCustomQuerySample WHERE metric_name = 'pg.replication.lagBytes' FACET replica_name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "WAL Receiver Details",
+          "description": "WAL receiver status from the replica's perspective.",
+          "layout": {
+            "column": 5,
+            "row": 8,
+            "width": 4,
+            "height": 2
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  "YOUR_ACCOUNT_ID"
+                ],
+                "query": "SELECT latest(metric_value) AS 'active', latest(receiver_status), latest(sender_host), latest(pending_bytes) AS 'pending bytes' FROM PgCustomQuerySample WHERE metric_name = 'pg.walReceiver.active' FACET displayName"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "instance",
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          "YOUR_ACCOUNT_ID"
+        ],
+        "query": "SELECT uniques(displayName) FROM PostgresqlInstanceSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "title": "Instance",
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          "YOUR_ACCOUNT_ID"
+        ],
+        "query": "SELECT uniques(label.service_name) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "service_name",
+      "title": "Service"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          "YOUR_ACCOUNT_ID"
+        ],
+        "query": "SELECT uniques(label.role) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "role",
+      "title": "Role"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          "YOUR_ACCOUNT_ID"
+        ],
+        "query": "SELECT uniques(checkType) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "checkType",
+      "title": "Check Type"
+    },
+    {
+      "items": null,
+      "defaultValues": [
+        {
+          "value": {
+            "string": "*"
+          }
+        }
+      ],
+      "nrqlQuery": {
+        "accountIds": [
+          "YOUR_ACCOUNT_ID"
+        ],
+        "query": "SELECT uniques(label.environment) FROM PostgresqlHealthSample"
+      },
+      "options": {
+        "hiddenOnVariablesBar": false,
+        "ignoreTimeRange": false,
+        "excluded": false,
+        "showApplyAction": true
+      },
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING",
+      "name": "environment",
+      "title": "Environment"
+    }
+  ]
+}
